@@ -1,0 +1,4 @@
+node_modules/
+*.log
+# ユーザーの 効果音ファイルは 上げない
+sounds/se/
