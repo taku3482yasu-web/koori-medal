@@ -37,8 +37,9 @@
             const c = { id: idSeq++, x, y, z, r: ball ? P.RB : R, h: ball ? P.RB * 2 : T, im: ball ? 0.35 : 1, ball, px: x, py: y, pz: z, vx: 0, vy: 0, vz: 0, tx: 0, ty: 0, spin: 0, kind, on: 0, level: z >= P.HU - T ? 1 : 0, gone: false };
             coins.push(c); return c;
         }
-        // 入れた メダル: 上段の プッシャーの 前に 落ちる
-        function insert(x) { return add(clampX(x + (rnd() - 0.5) * 8), pu.y + R + 2 + rnd() * 14, P.HU + 30 + rnd() * 10); }
+        // 入れた メダル: 上段の 動く プッシャーの 上 (いちばん 上の レーン) に 落ちる。プッシャーに はこばれて 前へ こぼれる
+        // (2026-11-18 ユーザー: 一番 上の 動いて いる レーンに 置かれる ように)
+        function insert(x) { return add(clampX(x + (rnd() - 0.5) * 8), R * 0.6 + rnd() * Math.max(0, pu.y - R * 1.4), P.HU + P.pushU.h + 24 + rnd() * 10); }
         // フィールドに 放出。stage 0 = 上段 (前の pusher.js と 同じ)・1 = 下段
         function spill(n, stage = 0) {
             const up = stage === 0;

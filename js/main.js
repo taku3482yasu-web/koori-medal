@@ -16,6 +16,8 @@
     const TOWER = { x: 340, w: 320, base: 596, stages: [500, 386, 272], top: 168 };   // 氷の 塔の 画面
     const RM = { x: 500, y: 352, rx: 360, q: 0.40 };                                  // ルーレットマシン (玉を 回して 入れる)
     const LCD = { x: 290, y: 10, w: 420, h: 152 };
+    const HOLD_COL = { blue: '#3a7ae0', aqua: '#6ae8ff', gold: '#ffd75e' };
+    const HOLD_X = i => LCD.x + 52 + i * 22;
     // ----- 遠近 (台の 座標 → 画面) -----
     const PCX = 500, PYB = 252, PYF = 612, PWF = 900, ZK = 0.95;
     const psc = t => 0.46 + 0.54 * t;
@@ -149,12 +151,13 @@
             tw.t = 0;
             if (st.go === 'up') {
                 tw.cracks++; Sound.se('crack');
+                text('上へ！', TOWER.x + TOWER.w / 2, TOWER.stages[tw.k] - 46, '#8fdcff', 26);
                 if (tw.k + 1 >= C.tower.length) { tw.phase = 'top'; Sound.se('hit'); say('koori', 'てっぺんだ！ JP ルーレットへ！', '#ffd75e'); }
                 else { tw.k++; Sound.se('up'); if (tw.k === 1) say('onioni', 'ここから 先は 通さんぞ！', '#ff8a8a'); }
             } else if (st.go === 'pay') { tw.phase = 'end'; Sound.se('pay'); pending -= tw.run.medals; text(`+${tw.run.medals} 枚`, TOWER.x + TOWER.w / 2, TOWER.stages[tw.k] - 30, '#ffd75e', 24); }
-            else { tw.phase = 'end'; Sound.se('fall'); say('onioni', 'がっはっは！ 落ちろ！', '#ff8a8a'); }
+            else { tw.phase = 'end'; Sound.se('fall'); say('onioni', 'がっはっは！ 落ちろ！', '#ff8a8a'); text('落下…', TOWER.x + TOWER.w / 2, TOWER.stages[tw.k] - 46, '#ff9a9a', 26); }
         } else if (tw.phase === 'top' && tw.t > 900) { tw.phase = 'wait'; rouletteStart(); }
-        else if (tw.phase === 'end' && tw.t > 900) tw.phase = 'idle';
+        else if (tw.phase === 'end' && tw.t > 1500) tw.phase = 'idle';
         else if (tw.phase === 'wait' && rl.phase === 'idle') tw.phase = 'idle';
     }
 
@@ -349,8 +352,9 @@
         for (const [x, w, h] of [[40, 70, 300], [120, 60, 220], [800, 70, 280], [880, 80, 340]]) { g.fillRect(x, C.H - h, w, h); g.beginPath(); g.moveTo(x - 4, C.H - h); g.lineTo(x + w / 2, C.H - h - 40); g.lineTo(x + w + 4, C.H - h); g.fill(); }
         g.textAlign = 'center'; g.fillStyle = '#bff0ff'; g.font = '30px "DotGothic16", monospace'; g.strokeStyle = '#000'; g.lineWidth = 5;
         g.strokeText('氷の 塔', 500, 46); g.fillText('氷の 塔', 500, 46);
-        g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillStyle = '#fff'; g.fillText('てっぺんまで 上れば JP ルーレット！', 500, 72);
+        g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillStyle = '#fff'; g.fillText('ボールが ころがって 止まった 穴で きまる。てっぺんまで 上れば JP ルーレット！', 500, 72);
         drawTower();
+        drawTowerGuide();
     }
 
     // ----- クレーン (ボスを 倒すと ビックボスメダルタワーを 台へ はこび、爆散させる) -----
@@ -429,7 +433,12 @@
             m.t += dt;
             if (m.t >= 260) {
                 inflight.splice(inflight.indexOf(m), 1);
-                if (m.chakker) { if (Game.chakker(s)) { Sound.se('chakker'); } chakFlash[m.chakker] = 1; if (s.shared.boss && s.shared.boss.started) Sound.se('attack'); }
+                if (m.chakker) {
+                    const ok = Game.chakker(s);
+                    chakFlash[m.chakker] = 1;
+                    if (s.shared.boss && s.shared.boss.started) Sound.se('attack');
+                    chakkerFx(m.chakker, ok);
+                }
                 P.insert(m.x - F.x);
             }
         }
@@ -440,6 +449,22 @@
         requestAnimationFrame(loop);
     }
     const chakFlash = {};
+    // チャッカーに 入った ことを 見せる (2026-11-18 ユーザー: 保留が ふえる 原理が わかりづらい)
+    // 「入賞！ 保留 +1」と 出して、光の 玉が チャッカーから 液晶の 保留ランプへ とぶ。4 個 たまって いたら「保留 MAX」
+    const holdFly = [];
+    let holdTip = false;
+    function chakkerX(id) { const ck = C.chakkers.find(c => c.id === id), l = PCX - PWF * psc(0) / 2, r = PCX + PWF * psc(0) / 2; return l + ck.x / F.w * (r - l); }
+    function chakkerFx(id, ok) {
+        const x = chakkerX(id), y = P3(0, 0, P.P.HU + P.P.pushU.h)[1] - 24;
+        if (s.shared.boss) return;
+        if (ok) {
+            Sound.se('chakker');
+            const n = me().hold.length;
+            holdFly.push({ x0: x, y0: y, i: n - 1, t: 0, c: me().hold[n - 1] });
+            text('入賞！ 保留 +1', x, y + 46, '#ffd75e', 16);
+            if (!holdTip) { holdTip = true; say('okagappa', 'チャッカーに 入ると 保留が 1 つ ふえて、液晶の スロットが 1 回 回る YO！', '#7fe0a0'); }
+        } else text('保留 MAX', x, y + 46, '#ff9a9a', 15);
+    }
 
     function hud() {
         $('medals').textContent = Math.max(0, me().medals - pending).toLocaleString();
@@ -546,9 +571,18 @@
         } else if (slot.phase === 'spin' && slot.sp && slot.sp.okagappa) Art.draw(g, 'okagappa', cx, cy, { height: 60, frame: Math.floor(t / 120) });
         else Art.draw(g, 'koori', cx, cy, { height: 46, frame: Math.floor(t / 400) });
         // 保留 (青 → 水色 → 金)
-        const col = { blue: '#3a7ae0', aqua: '#6ae8ff', gold: '#ffd75e' };
-        me().hold.forEach((c, i) => { g.fillStyle = col[c]; g.beginPath(); g.arc(x + 30 + i * 22, y + h - 18, 7, 0, 7); g.fill(); });
-        g.fillStyle = 'rgba(255,255,255,0.5)'; g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText('保留', x + 120, y + h - 14);
+        // 2026-11-18 ユーザー: 保留が わかりづらい → わくを 4 つ いつも 出して、何個 たまって いるかを 見せる
+        const col = HOLD_COL, hy = y + h - 18, flying = holdFly.map(f => f.i);
+        g.fillStyle = 'rgba(255,255,255,0.75)'; g.font = 'bold 11px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText('保留', x + 14, hy + 4);
+        for (let i = 0; i < C.slot.hold; i++) {
+            const hx = HOLD_X(i), c = me().hold[i];
+            g.strokeStyle = 'rgba(191,240,255,0.55)'; g.lineWidth = 1.5; g.beginPath(); g.arc(hx, hy, 8, 0, 7); g.stroke();
+            if (c && !flying.includes(i)) { g.fillStyle = col[c]; g.beginPath(); g.arc(hx, hy, 7, 0, 7); g.fill(); g.fillStyle = 'rgba(255,255,255,0.7)'; g.beginPath(); g.arc(hx - 2, hy - 2, 2.2, 0, 7); g.fill(); }
+        }
+        g.fillStyle = me().hold.length >= C.slot.hold ? '#ff9a9a' : 'rgba(255,255,255,0.75)'; g.font = 'bold 11px "DotGothic16", monospace';
+        g.fillText(`${me().hold.length}/${C.slot.hold}`, HOLD_X(C.slot.hold - 1) + 14, hy + 4);
+        g.fillStyle = 'rgba(191,240,255,0.6)'; g.font = '10px "M PLUS Rounded 1c", sans-serif';
+        g.fillText('↓ L・CENTER・R に 入ると +1', HOLD_X(C.slot.hold - 1) + 44, hy + 4);
     }
     // ----- 台 (遠近) -----
     const FW = () => P.P.FW, LE = () => P.P.LE;
@@ -563,8 +597,12 @@
         const wy = P3(0, 0, P.P.HU + P.P.pushU.h)[1], l = PCX - PWF * psc(0) / 2, r = PCX + PWF * psc(0) / 2;
         g.fillStyle = '#0e2448'; g.beginPath(); g.moveTo(l - 10, wy - 40); g.lineTo(r + 10, wy - 40); g.lineTo(r, wy); g.lineTo(l, wy); g.closePath(); g.fill();
         g.strokeStyle = '#8fdcff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(l - 10, wy - 40); g.lineTo(r + 10, wy - 40); g.stroke();
+        g.fillStyle = 'rgba(191,240,255,0.7)'; g.font = '10px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left';
+        g.fillText('チャッカー (入ると 保留 +1)', l + 4, wy - 4);
         for (const ck of C.chakkers) {
             const cx = l + ck.x / F.w * (r - l), w = ck.w / F.w * (r - l) * 1.3, f = chakFlash[ck.id] || 0, main = ck.id === 'C';
+            const aimed = Math.abs(aimX - F.x - ck.x) < ck.w / 2 + C.insertJitter * 0.5;
+            if (aimed && f <= 0) { g.fillStyle = `rgba(255,215,94,${0.18 + 0.12 * Math.sin(t / 120)})`; rr(cx - w / 2 - 4, wy - 36, w + 8, 26, 10); g.fill(); }
             g.fillStyle = f > 0 ? `rgba(255,215,94,${0.5 + f * 0.5})` : '#02060e';
             rr(cx - w / 2, wy - 32, w, 18, 8); g.fill();
             g.strokeStyle = main ? '#ffd75e' : '#8fdcff'; g.lineWidth = 2; g.stroke();
@@ -574,8 +612,15 @@
         // ねらう 位置
         const ax = l + (aimX - F.x) / F.w * (r - l);
         g.fillStyle = '#ffd75e'; g.beginPath(); g.moveTo(ax - 8, wy - 54); g.lineTo(ax + 8, wy - 54); g.lineTo(ax, wy - 42); g.fill();
-        // 落ちて いる メダル
-        for (const m of inflight) { const k = m.t / 260, [x, y] = P3(m.x - F.x, P.pushers.upper.y + 12, P.P.HU + 70 * (1 - k)); medal(x, y, 9 + 3 * (1 - k)); }
+        // 落ちて いる メダル (上段の 動く プッシャーの 上に 落ちる)
+        for (const m of inflight) { const k = m.t / 260, [x, y] = P3(m.x - F.x, P.pushers.upper.y * 0.5, P.P.HU + P.P.pushU.h + 70 * (1 - k)); medal(x, y, 9 + 3 * (1 - k)); }
+        // チャッカー → 液晶の 保留ランプへ とぶ 光
+        for (const f of [...holdFly]) {
+            f.t += 16; const k = Math.min(1, f.t / 420), x1 = HOLD_X(f.i), y1 = LCD.y + LCD.h - 18;
+            const x = f.x0 + (x1 - f.x0) * k, y = f.y0 + (y1 - f.y0) * k - Math.sin(k * Math.PI) * 40;
+            g.fillStyle = HOLD_COL[f.c] || '#ffd75e'; g.shadowColor = '#fff'; g.shadowBlur = 12; g.beginPath(); g.arc(x, y, 7, 0, 7); g.fill(); g.shadowBlur = 0;
+            if (k >= 1) holdFly.splice(holdFly.indexOf(f), 1);
+        }
     }
     // 平らな メダル (画面の 小物用)
     function medal(x, y, r, kind) {
@@ -672,18 +717,27 @@
         g.fillStyle = gr; g.beginPath(); g.moveTo(T.x + 20, T.base); g.lineTo(T.x + 50, T.top); g.lineTo(T.x + T.w - 50, T.top); g.lineTo(T.x + T.w - 20, T.base); g.fill();
         g.fillStyle = '#e8faff'; g.beginPath(); g.moveTo(T.x + 40, T.top); g.lineTo(cx, T.top - 70); g.lineTo(T.x + T.w - 40, T.top); g.fill();
         g.fillStyle = '#ffd75e'; g.font = 'bold 14px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText('JP', cx, T.top - 20);
-        // 段
+        // 段: どの 段も 穴が 3 つ (左 = 払い出し・まんなか = 上へ・右 = 落下)
+        // 2026-11-18 ユーザー: 塔で 何を して いるのか わかりづらい → 穴に 名前を 書き、ボールが どこに 止まったかを 見せる
+        const now = towerNow();
         T.stages.forEach((y, k) => {
             const w = T.w - 60 - k * 20, x = cx - w / 2;
-            g.fillStyle = '#e0f6ff'; g.fillRect(x, y, w, 10);
-            const st = C.tower[k];
-            g.fillStyle = '#ffd75e'; g.fillRect(x + 8, y - 4, 26, 6);                 // 払い出しの 穴
-            g.fillStyle = '#0a1830'; g.fillRect(x + w - 34, y - 4, 26, 6);             // 落下の 穴
-            g.fillStyle = '#13305a'; g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'center';
-            g.fillText(`${k + 1}段 ${st.medals}枚`, cx, y + 24);
+            const active = now && now.k === k;
+            g.globalAlpha = now && !active ? 0.55 : 1;
+            g.fillStyle = active ? '#ffffff' : '#e0f6ff'; g.fillRect(x, y, w, 10);
+            for (const hItem of towerHoles(k)) {
+                const lit = active && now.settled && now.go === hItem.go;
+                g.fillStyle = hItem.col; rr(hItem.x - 15, y - 5, 30, 8, 3); g.fill();
+                if (lit) { g.strokeStyle = '#fff'; g.lineWidth = 3; g.shadowColor = hItem.col; g.shadowBlur = 16; rr(hItem.x - 17, y - 7, 34, 12, 4); g.stroke(); g.shadowBlur = 0; }
+                g.fillStyle = '#ffffff'; g.strokeStyle = '#06203e'; g.lineWidth = 3; g.font = 'bold 11px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'center';
+                g.strokeText(hItem.label, hItem.x, y - 12); g.fillStyle = hItem.tx; g.fillText(hItem.label, hItem.x, y - 12);
+            }
+            g.fillStyle = '#13305a'; g.font = 'bold 12px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'center';
+            g.fillText(`${k + 1}段目`, cx, y + 26);
+            g.globalAlpha = 1;
         });
         // ひび (上った ぶん)
-        if (tw.phase !== 'idle') for (let k = 0; k < tw.cracks; k++) { g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 2; const y = T.stages[k] + 30; g.beginPath(); g.moveTo(cx - 30, y); g.lineTo(cx - 10, y + 12); g.lineTo(cx + 6, y + 2); g.lineTo(cx + 26, y + 16); g.stroke(); }
+        if (tw.phase !== 'idle') for (let k = 0; k < tw.cracks; k++) { g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 2; const y = T.stages[k] + 34; g.beginPath(); g.moveTo(cx - 30, y); g.lineTo(cx - 10, y + 12); g.lineTo(cx + 6, y + 2); g.lineTo(cx + 26, y + 16); g.stroke(); }
         // おにおに (塔の 途中で 待ちかまえる)
         Art.draw(g, 'onioni', T.x + T.w - 18, T.stages[1] - 2, { height: 44, frame: Math.floor(t / 300), flip: true });
         // おかがっぱ (ボールリフト係)
@@ -691,17 +745,75 @@
         // ボールと こおりくん
         if (tw.phase !== 'idle' && tw.phase !== 'wait') {
             let bx = cx, by = T.base - 20;
-            if (tw.phase === 'lift') { const k = tw.t / 1100; bx = T.x + 40; by = T.base - 20 - k * (T.base - 20 - T.stages[0] + 14); }
-            else if (tw.phase === 'climb' || tw.phase === 'end' || tw.phase === 'top') {
-                const k = Math.min(1, tw.t / C.towerStepMs), y = T.stages[Math.min(tw.k, 2)] - 13, w = T.w - 60 - tw.k * 20;
-                const st = tw.run.steps[tw.k];
-                if (tw.phase === 'climb') { bx = cx - w / 2 + 20 + Math.abs(Math.sin(k * Math.PI * 1.5)) * (w - 40); by = y; }
-                else if (tw.phase === 'top') { bx = cx; by = T.top - 30; }
-                else { bx = st && st.go === 'pay' ? cx - w / 2 + 21 : cx + w / 2 - 21; by = y + Math.min(20, tw.t / 30); }
+            if (tw.phase === 'lift') { const k = tw.t / 1100; bx = T.x + 40 + (cx - T.x - 40) * k; by = T.base - 20 - k * (T.base - 20 - T.stages[0] + 14); }
+            else if (tw.phase === 'top') { bx = cx; by = T.top - 30 - Math.min(20, tw.t / 20); }
+            else {
+                const k = Math.min(tw.k, 2), y = T.stages[k] - 13, w = T.w - 60 - k * 20, st = tw.run.steps[tw.k];
+                const target = towerHoles(k).find(h => h.go === (st ? st.go : 'up')).x;
+                if (tw.phase === 'climb') {
+                    // ころがって (左右に ゆれて)、だんだん 止まる 穴へ
+                    const kr = Math.min(1, tw.t / (C.towerStepMs * 0.7)), amp = (w / 2 - 22) * (1 - kr);
+                    bx = target + (cx - target) * (1 - kr) + Math.sin(kr * Math.PI * 4) * amp;
+                    bx = Math.max(cx - w / 2 + 12, Math.min(cx + w / 2 - 12, bx));
+                    by = y - Math.abs(Math.sin(kr * Math.PI * 4)) * 6 * (1 - kr) + (kr >= 1 ? 8 : 0);
+                } else { bx = target; by = y + 8 + Math.min(st && st.go === 'fall' ? 120 : 14, tw.t / 8); }
             }
             medal(bx, by, F.ballR, 'ball');
             Art.draw(g, 'koori', bx + 22, by + 12, { height: 30, frame: Math.floor(t / 150) });
         }
+    }
+    // 段の 穴の 位置と 名前
+    function towerHoles(k) {
+        const T = TOWER, cx = T.x + T.w / 2, w = T.w - 60 - k * 20, st = C.tower[k];
+        return [
+            { go: 'pay', x: cx - w / 2 + 22, col: '#ffd75e', tx: '#ffe890', label: `払い出し ${st.medals}枚` },
+            { go: 'up', x: cx, col: '#3aa8ff', tx: '#bff0ff', label: k + 1 >= C.tower.length ? '↑ てっぺん' : '↑ 上へ' },
+            { go: 'fall', x: cx + w / 2 - 22, col: '#0a1830', tx: '#ffb0b0', label: '落下' }
+        ];
+    }
+    // いま どの 段で 何を して いるか
+    function towerNow() {
+        if (tw.phase === 'climb' || tw.phase === 'end') {
+            const st = tw.run.steps[tw.k];
+            return { k: Math.min(tw.k, 2), go: st ? st.go : 'up', settled: tw.phase === 'end' || tw.t >= C.towerStepMs * 0.7 };
+        }
+        return null;
+    }
+    // 塔の 画面の 説明 (右: 段の 表・左: いま して いる こと と 穴の 見かた)
+    function drawTowerGuide() {
+        const n = C.tower.length;
+        const gx = 720, gw = 250;
+        g.fillStyle = 'rgba(4,12,28,0.7)'; rr(gx, 110, gw, 50 + (n + 1) * 44, 12); g.fill(); g.strokeStyle = '#2b4c80'; g.lineWidth = 1.5; g.stroke();
+        g.fillStyle = '#bff0ff'; g.font = 'bold 14px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText('塔の すすみ', gx + 14, 134);
+        const cur = tw.phase === 'top' ? n : tw.phase === 'lift' ? -1 : Math.min(tw.k, n - 1);
+        for (let i = n; i >= 0; i--) {
+            const y = 146 + (n - i) * 44, on = i === cur, done = i < cur;
+            g.fillStyle = on ? 'rgba(255,215,94,0.25)' : 'rgba(255,255,255,0.05)'; rr(gx + 10, y, gw - 20, 36, 8); g.fill();
+            if (on) { g.strokeStyle = '#ffd75e'; g.lineWidth = 2; g.stroke(); }
+            g.fillStyle = on ? '#ffd75e' : done ? '#8fdcff' : 'rgba(255,255,255,0.7)'; g.font = 'bold 13px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left';
+            g.fillText(i === n ? 'てっぺん → JP ルーレット' : `${i + 1}段目  払い出しは ${C.tower[i].medals}枚`, gx + 22, y + 23);
+            if (done) { g.textAlign = 'right'; g.fillText('✔', gx + gw - 22, y + 23); }
+        }
+        let msg = '', sub = '';
+        const now = towerNow();
+        if (tw.phase === 'lift') { msg = 'ボールを 塔へ はこぶ'; sub = 'スロットで もらった ボールを おかがっぱが 1段目へ'; }
+        else if (now && !now.settled) { msg = `${now.k + 1}段目: ころころ…`; sub = 'ボールが どの 穴に 入るかな？'; }
+        else if (now) {
+            const st = C.tower[now.k];
+            if (now.go === 'up') { msg = now.k + 1 >= n ? 'てっぺんへ！' : `上へ！ ${now.k + 2}段目へ`; sub = '上の 段ほど 払い出しが ふえる'; }
+            else if (now.go === 'pay') { msg = `払い出し +${st.medals}枚`; sub = 'ここで おしまい。メダル ゲット！'; }
+            else { msg = '落下… ざんねん'; sub = 'ボールは 塔の 下へ 落ちた'; }
+        } else if (tw.phase === 'top') { msg = 'てっぺん！'; sub = 'JP ルーレットへ！'; }
+        g.fillStyle = 'rgba(4,12,28,0.7)'; rr(30, 110, 280, 84, 12); g.fill(); g.strokeStyle = '#2b4c80'; g.lineWidth = 1.5; g.stroke();
+        g.textAlign = 'left'; g.fillStyle = '#ffd75e'; g.font = 'bold 20px "M PLUS Rounded 1c", sans-serif'; g.fillText(msg, 46, 144);
+        g.fillStyle = '#d8eeff'; g.font = '12px "M PLUS Rounded 1c", sans-serif'; g.fillText(sub, 46, 172);
+        g.fillStyle = 'rgba(4,12,28,0.6)'; rr(30, 210, 280, 104, 12); g.fill();
+        g.fillStyle = '#bff0ff'; g.font = 'bold 12px "M PLUS Rounded 1c", sans-serif'; g.fillText('穴の 見かた', 46, 228);
+        [['#ffd75e', '払い出し', 'その 段の 枚数を もらって おわり'], ['#3aa8ff', '上へ', 'つぎの 段へ (てっぺんで JP)'], ['#0a1830', '落下', 'なにも なしで おわり']].forEach(([c, a, b], i) => {
+            const y = 252 + i * 22;
+            g.fillStyle = c; rr(46, y - 8, 26, 8, 3); g.fill(); if (c === '#0a1830') { g.strokeStyle = '#8fdcff'; g.lineWidth = 1; g.stroke(); }
+            g.fillStyle = '#fff'; g.font = 'bold 12px "M PLUS Rounded 1c", sans-serif'; g.fillText(a, 82, y); g.fillStyle = '#bcd4ee'; g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.fillText(b, 142, y);
+        });
     }
     // ビックボスメダルタワー (右うえ・ゲージで 積み上がる)。ボスを 倒すと クレーンで 台へ はこぶ
     function stack(x, y, n, r) {
@@ -820,9 +932,9 @@
     function popup(html, after) { $('modal-box').innerHTML = html; $('modal').hidden = false; if (after) after(); }
     function closePopup() { $('modal').hidden = true; }
     $('help-btn').addEventListener('click', () => popup(`<h2>遊び方</h2><ul>
-        <li>プッシャーの 上を タップ (クリック) すると、その 位置に メダルを 入れる。長押しで 連射。▼ が ねらう 位置。</li>
-        <li>上段の 入り口の チャッカー (左・中央・右) に 入ると 液晶スロットの 抽選 (保留は 4 個 まで。青 → 水色 → 金 で 期待度 アップ)。</li>
-        <li>スロットで ボールが 出ると、おかがっぱが ボールを 氷の 塔へ。1 段ずつ「上へ」「払い出し」「落下」。てっぺんまで 行くと JP ルーレット！</li>
+        <li>プッシャーの 上を タップ (クリック) すると、その 位置に メダルを 入れる。長押しで 連射。▼ が ねらう 位置。メダルは いちばん 上の 動く プッシャーの 上に 落ちて、前へ こぼれて いく。</li>
+        <li>入れた メダルが 上の チャッカー (L・CENTER・R の 穴) を 通ると、入る ことが ある。入ると 保留が 1 つ ふえ、保留 1 つで 液晶スロットが 1 回 回る (保留は 4 個 まで。青 → 水色 → 金 で 期待度 アップ)。▼ が チャッカーの 上に あると 穴が 光る。</li>
+        <li>スロットで ボールが 出ると、おかがっぱが ボールを 氷の 塔へ。どの 段にも 穴が 3 つ (払い出し・上へ・落下) あり、ボールが ころがって 止まった 穴で きまる。「上へ」なら つぎの 段へ、てっぺんまで 行くと JP ルーレット！</li>
         <li>JP ルーレットの JP ポケットで「こおりJP」。入れた メダルで プールが ふえる。</li>
         <li>ボスゲージが たまるか、スロットで ボス図柄が そろうと「ビックボスチャレンジ」。${C.boss.sec} 秒 以内に みんなで 強敵を 倒すと、ビックボスメダルタワーが 爆散して メダルが ふる！</li>
         <li>手前から 落ちた メダルが 払い出し。左右の はしの 穴に 落ちると もどらない。</li>
