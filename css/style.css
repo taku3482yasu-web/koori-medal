@@ -52,3 +52,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
     .stat b { font-size: 17px; }
 }
 @media (max-height: 480px) { .bar { padding: 2px 4px 4px; } .logo { display: none; } .hint { display: none; } }
+
+/* ----- スマホ: 横画面で 遊ぶ (2026-11-18 ユーザー) -----
+   .land = 横長で 高さが ひくい: メダル・JP・ゲージを 左の 細い 列に まとめて、台を 大きく
+   .rot  = スマホが 縦向き: 画面ごと 90° 回して 横画面に する (スマホを 左に たおして 遊ぶ) */
+body.land #app { flex-direction: row; max-width: none; padding: 4px 6px; gap: 6px; }
+body.land .bar { display: flex; flex-direction: column; justify-content: center; align-items: stretch; width: 104px; padding: 2px; gap: 10px; }
+body.land .logo, body.land .hint { display: none; }
+body.land .stat b { font-size: 18px; }
+body.land .tools { justify-content: center; }
+body.land #stage { border-radius: 10px; }
+body.rot #app, body.rot .modal {
+    position: fixed; inset: auto; top: 0; left: 100vw; width: 100vh; width: 100dvh; height: 100vw;
+    transform-origin: 0 0; transform: rotate(90deg);
+}
+body.rot .modal-box { max-height: calc(100vw - 32px); }

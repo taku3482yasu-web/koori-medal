@@ -58,7 +58,8 @@
         if (!r) return;
         Sound.se('insert');
         const e = Game.entry(s, aimX);
-        inflight.push({ x: e.x, t: 0, chakker: e.chakker });
+        const over = C.chakkers.find(c => Math.abs(e.x - F.x - c.x) < c.w / 2);
+        inflight.push({ x: e.x, t: 0, chakker: e.chakker, over: over ? over.id : null });
         if (r.bossStart) bossSelect();
     }
     function noMedals() {
@@ -75,8 +76,31 @@
         if (u < -0.06 || u > 1.06) return null;
         return F.x + Math.max(12, Math.min(F.w - 12, u * F.w));
     }
-    function toStage(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * C.W / r.width, y: (e.clientY - r.top) * C.H / r.height }; }
+    // 画面の 点 → 台の 座標。縦向きの スマホで 画面ごと 90° 回して いる ときは 向きを もどす
+    function toStage(e) {
+        const r = cv.getBoundingClientRect();
+        if (document.body.classList.contains('rot')) return { x: (e.clientY - r.top) * C.W / r.height, y: (r.right - e.clientX) * C.H / r.width };
+        return { x: (e.clientX - r.left) * C.W / r.width, y: (e.clientY - r.top) * C.H / r.height };
+    }
+    // スマホは 横画面で 遊ぶ (2026-11-18 ユーザー)。縦向きなら 画面ごと 回す・横向きで 高さが ひくければ 左に 数字の 列
+    const phone = () => params.get('phone') === '1' || (matchMedia('(pointer: coarse)').matches && Math.min(innerWidth, innerHeight) <= 820);
+    function layout() {
+        const ph = phone(), rot = ph && innerHeight > innerWidth;
+        document.body.classList.toggle('rot', rot);
+        document.body.classList.toggle('land', rot || (innerWidth > innerHeight && innerHeight <= 600));
+    }
+    layout();
+    addEventListener('resize', layout); addEventListener('orientationchange', () => setTimeout(layout, 200));
+    // Android など: 最初に さわった ときに 全画面に して 横向きに 固定 (できない ブラウザでは 画面ごと 回す まま)
+    let triedFull = false;
+    function goLandscape() {
+        if (triedFull || !phone()) return; triedFull = true;
+        const el = document.documentElement;
+        if (!el.requestFullscreen) return;
+        el.requestFullscreen({ navigationUI: 'hide' }).then(() => screen.orientation && screen.orientation.lock ? screen.orientation.lock('landscape') : null).catch(() => {});
+    }
     cv.addEventListener('pointerdown', e => {
+        goLandscape();
         const p = toStage(e);
         const a = aimFrom(p); if (a === null) return;
         aimX = a;
@@ -137,7 +161,8 @@
     function towerUpdate(dt) {
         if (tw.phase === 'idle') {
             if (srJp && rl.phase === 'idle') { srJp = false; tw.phase = 'wait'; rouletteStart(); return; }
-            if (me().balls <= 0 || rl.phase !== 'idle') return;
+            // 2026-11-18 ユーザー: ルーレットが 当たったのに 何も 出ない → スペシャルルーレットが 先 (塔の 画面に かくれて いた)
+            if (me().balls <= 0 || rl.phase !== 'idle' || sr.phase !== 'idle' || sr.queue.length) return;
             tw.run = Game.tower(s);
             tw.t = 0; tw.k = -1; tw.phase = 'lift'; tw.cracks = 0;
             if (tw.run.end === 'pay') pending += tw.run.medals;
@@ -175,19 +200,20 @@
         if (rl.phase === 'idle') return;
         rl.t += dt;
         if (rl.phase === 'spin') {
-            const k = Math.min(1, rl.t / C.roulette.spinMs);
+            const k = Math.min(KL + 0.01, rl.t / C.roulette.spinMs);
             wheelTick(rl.wheel, k);
             Sound.thin(1 - k * 0.8);
-            if (k >= 1) {
+            if (k >= KL + 0.01) {
                 rl.phase = 'result'; rl.t = 0; Sound.thin(1);
+                resultFx(rl.res, true);
                 const r = rl.res;
                 if (r.kind === 'jp') { jpStart(r); }
                 else if (r.kind === 'again') { Sound.se('okagappa'); say('okagappa', 'もう 一回！', '#7fe0a0'); }
                 else { Sound.se('pay'); pending -= r.medals; }
             }
         } else if (rl.phase === 'result') {
-            wheelTick(rl.wheel, 1 + rl.t / C.roulette.spinMs);
-            if (rl.t < (rl.res.kind === 'jp' ? 7000 : 1800)) return;
+            wheelTick(rl.wheel, KL + 0.01 + rl.t / C.roulette.spinMs);
+            if (rl.t < (rl.res.kind === 'jp' ? 7000 : RESULT_MS)) return;
             if (rl.res.kind === 'again') { rouletteStart(); return; }
             rl.phase = 'idle'; Sound.play(boss.phase === 'fight' ? 'boss' : 'normal');
         }
@@ -223,24 +249,54 @@
         }
         sr.t += dt;
         if (sr.phase === 'spin') {
-            const k = Math.min(1, sr.t / C.specialRoulette.spinMs);
+            const k = Math.min(KL + 0.01, sr.t / C.specialRoulette.spinMs);
             wheelTick(sr.wheel, k);
-            if (k >= 1) {
+            if (k >= KL + 0.01) {
                 sr.phase = 'result'; sr.t = 0;
                 const r = sr.res;
+                resultFx(r, false);
                 if (r.kind === 'medals') { Sound.se('pay'); pending -= r.medals; }
                 else if (r.kind === 'ball') { Sound.se('hit'); say('okagappa', '氷の 塔の ボール ゲット！', '#7fe0a0'); }
                 else if (r.kind === 'boss') { Sound.se('roar'); say('furukawa', `ボスゲージ アップ！`, '#ff8a8a'); if (r.bossStart) bossSelect(); }
                 else { Sound.se('hit'); say('koori', 'JP ルーレットへ 直行だ！', '#ffd75e'); }
             }
         } else if (sr.phase === 'result') {
-            wheelTick(sr.wheel, 1 + sr.t / C.specialRoulette.spinMs);
-            if (sr.t < 1800) return;
+            wheelTick(sr.wheel, KL + 0.01 + sr.t / C.specialRoulette.spinMs);
+            if (sr.t < RESULT_MS) return;
             if (sr.res.kind === 'jpc') srJp = true;
             sr.phase = 'idle';
         }
     }
-    let srJp = false;   // スペシャルルーレットの「JP ルーレットへ」(塔と ルーレットが あいたら 回す)
+    let srJp = false;
+    // ルーレットの 結果を 見せる 時間と 札
+    const RESULT_MS = 3200;
+    let resBoard = null;
+    function resultFx(r, jp) {
+        const v = (jp ? C.roulette.pockets : C.specialRoulette.pockets)[r.idx];
+        let big, sub, col = '#ffd75e';
+        if (r.kind === 'jp') { big = 'こおりJP!!'; sub = `${r.medals.toLocaleString()} 枚！`; }
+        else if (r.kind === 'again') { big = 'もう 1回！'; sub = 'もう 一度 ルーレットを 回す'; col = '#7fe0a0'; }
+        else if (r.kind === 'medals') { big = `+${r.medals} 枚 ゲット！`; sub = 'メダルが ふえた'; }
+        else if (r.kind === 'ball') { big = '氷の 塔の ボール +1'; sub = 'このあと 氷の 塔へ (てっぺんで JP ルーレット)'; col = '#8fdcff'; }
+        else if (r.kind === 'boss') { big = 'ボスゲージ アップ！'; sub = 'ゲージが いっぱいで ビックボスチャレンジ'; col = '#ff8a8a'; }
+        else { big = 'JP ルーレットへ！'; sub = 'このあと JP ルーレットを 回す'; }
+        resBoard = { big, sub, col, v, t: 0, jp };
+        flash = Math.max(flash, 0.35);
+    }
+    function drawResBoard(dt) {
+        if (!resBoard) return;
+        resBoard.t += dt;
+        const ph = resBoard.jp ? rl.phase : sr.phase;
+        if (ph !== 'result') { resBoard = null; return; }
+        const k = Math.min(1, resBoard.t / 220), w = 520, h = 112, x = RM.x - w / 2, y = 470;
+        g.save(); g.globalAlpha = k; g.translate(RM.x, y + h / 2); g.scale(0.8 + 0.2 * k, 0.8 + 0.2 * k); g.translate(-RM.x, -(y + h / 2));
+        g.fillStyle = 'rgba(0,0,0,0.78)'; rr(x, y, w, h, 18); g.fill();
+        g.strokeStyle = resBoard.col; g.lineWidth = 4; rr(x, y, w, h, 18); g.stroke();
+        g.textAlign = 'center'; g.font = '44px "DotGothic16", monospace'; g.strokeStyle = '#000'; g.lineWidth = 7;
+        g.fillStyle = Math.floor(t / 200) % 2 ? resBoard.col : '#ffffff'; g.strokeText(resBoard.big, RM.x, y + 54); g.fillText(resBoard.big, RM.x, y + 54);
+        g.font = 'bold 16px "M PLUS Rounded 1c", sans-serif'; g.fillStyle = '#ffffff'; g.fillText(resBoard.sub, RM.x, y + 90);
+        g.restore();
+    }   // スペシャルルーレットの「JP ルーレットへ」(塔と ルーレットが あいたら 回す)
     // ===== ルーレットマシン (カジノの ように 玉を 回して ポケットに 入れる) =====
     // 結果 (idx) は 先に きまって いる。円盤は 右回り・玉は 左回りで まわり、だんだん 内がわへ 落ちて idx に 入る
     const KL = 0.78;   // 玉が ポケットに 入る とき (spinMs の 割合)
@@ -334,14 +390,8 @@
         // 見て いる キャラ
         Art.draw(g, 'okagappa', 80, 600, { height: 110, frame: Math.floor(t / 160) });
         Art.draw(g, jp ? 'onioni' : 'koori', 920, 600, { height: 100, frame: Math.floor(t / 200), flip: true });
-        // 結果
-        const ph = jp ? rl.phase : sr.phase, res = jp ? rl.res : sr.res;
-        if (ph === 'result' && res) {
-            const v = pockets[res.idx];
-            const msg = jp ? (v === 'jp' ? 'こおりJP!!' : v === 'again' ? 'もう 1回！' : `${v} 枚`) : (v === 'jpc' ? 'JP ルーレットへ！' : v === 'ball' ? '塔の ボール ゲット！' : v === 'boss' ? 'ボスゲージ アップ！' : `${v} 枚`);
-            g.font = '44px "DotGothic16", monospace'; g.textAlign = 'center'; g.strokeStyle = '#000'; g.lineWidth = 7;
-            g.fillStyle = Math.floor(t / 200) % 2 ? '#ffd75e' : '#fff4c0'; g.strokeText(msg, RM.x, 560); g.fillText(msg, RM.x, 560);
-        }
+        // 結果 (札)
+        drawResBoard(16);
     }
     // 氷の 塔の 画面
     function drawTowerScene() {
@@ -438,6 +488,8 @@
                     chakFlash[m.chakker] = 1;
                     if (s.shared.boss && s.shared.boss.started) Sound.se('attack');
                     chakkerFx(m.chakker, ok);
+                } else if (m.over && !s.shared.boss && t - (missAt[m.over] || -1e9) > 1500) {
+                    missAt[m.over] = t; text('おしい', chakkerX(m.over), P3(0, 0, P.P.HU + P.P.pushU.h)[1] + 22, 'rgba(220,235,255,0.8)', 13);
                 }
                 P.insert(m.x - F.x);
             }
@@ -452,6 +504,7 @@
     // チャッカーに 入った ことを 見せる (2026-11-18 ユーザー: 保留が ふえる 原理が わかりづらい)
     // 「入賞！ 保留 +1」と 出して、光の 玉が チャッカーから 液晶の 保留ランプへ とぶ。4 個 たまって いたら「保留 MAX」
     const holdFly = [];
+    const missAt = {};
     let holdTip = false;
     function chakkerX(id) { const ck = C.chakkers.find(c => c.id === id), l = PCX - PWF * psc(0) / 2, r = PCX + PWF * psc(0) / 2; return l + ck.x / F.w * (r - l); }
     function chakkerFx(id, ok) {
@@ -594,26 +647,38 @@
     const face3 = (y, z0, z1) => [P3(0, y, z1), P3(FW(), y, z1), P3(FW(), y, z0), P3(0, y, z0)];
     // うしろの かべ (チャッカー)・ねらう 位置・入れた メダル
     function drawInlet() {
+        // 2026-11-18 ユーザー: 保留の チャッカーが 分かりづらい → 大きく して「保留+1」と 書き、メダルが ▼ から チャッカーの 列を 通って 落ちる ように
         const wy = P3(0, 0, P.P.HU + P.P.pushU.h)[1], l = PCX - PWF * psc(0) / 2, r = PCX + PWF * psc(0) / 2;
-        g.fillStyle = '#0e2448'; g.beginPath(); g.moveTo(l - 10, wy - 40); g.lineTo(r + 10, wy - 40); g.lineTo(r, wy); g.lineTo(l, wy); g.closePath(); g.fill();
-        g.strokeStyle = '#8fdcff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(l - 10, wy - 40); g.lineTo(r + 10, wy - 40); g.stroke();
-        g.fillStyle = 'rgba(191,240,255,0.7)'; g.font = '10px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left';
-        g.fillText('チャッカー (入ると 保留 +1)', l + 4, wy - 4);
+        const cy = wy - 22;                                   // チャッカーの 列の まんなか
+        g.fillStyle = '#0e2448'; g.beginPath(); g.moveTo(l - 10, wy - 44); g.lineTo(r + 10, wy - 44); g.lineTo(r, wy); g.lineTo(l, wy); g.closePath(); g.fill();
+        g.strokeStyle = '#8fdcff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(l - 10, wy - 44); g.lineTo(r + 10, wy - 44); g.stroke();
+        g.fillStyle = 'rgba(191,240,255,0.85)'; g.font = 'bold 12px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'right';
+        g.fillText('チャッカー →', l - 16, cy + 4);
         for (const ck of C.chakkers) {
-            const cx = l + ck.x / F.w * (r - l), w = ck.w / F.w * (r - l) * 1.3, f = chakFlash[ck.id] || 0, main = ck.id === 'C';
+            const x = l + ck.x / F.w * (r - l), w = ck.w / F.w * (r - l) * 1.5, f = chakFlash[ck.id] || 0, main = ck.id === 'C';
             const aimed = Math.abs(aimX - F.x - ck.x) < ck.w / 2 + C.insertJitter * 0.5;
-            if (aimed && f <= 0) { g.fillStyle = `rgba(255,215,94,${0.18 + 0.12 * Math.sin(t / 120)})`; rr(cx - w / 2 - 4, wy - 36, w + 8, 26, 10); g.fill(); }
+            if (aimed && f <= 0) { g.fillStyle = `rgba(255,215,94,${0.22 + 0.14 * Math.sin(t / 120)})`; rr(x - w / 2 - 5, cy - 18, w + 10, 36, 12); g.fill(); }
             g.fillStyle = f > 0 ? `rgba(255,215,94,${0.5 + f * 0.5})` : '#02060e';
-            rr(cx - w / 2, wy - 32, w, 18, 8); g.fill();
+            rr(x - w / 2, cy - 14, w, 28, 10); g.fill();
             g.strokeStyle = main ? '#ffd75e' : '#8fdcff'; g.lineWidth = 2; g.stroke();
-            g.fillStyle = main ? '#ffd75e' : '#8fdcff'; g.font = '9px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText(main ? 'CENTER' : ck.id, cx, wy - 20);
+            // 穴 (メダルが 入る 口)
+            g.fillStyle = f > 0 ? '#fff6c0' : '#000'; g.beginPath(); g.ellipse(x, cy - 7, w * 0.32, 3.5, 0, 0, 7); g.fill();
+            g.strokeStyle = 'rgba(143,220,255,0.5)'; g.lineWidth = 1; g.stroke();
+            g.textAlign = 'center'; g.fillStyle = f > 0 ? '#3a2400' : main ? '#ffd75e' : '#ffe890'; g.font = 'bold 11px "M PLUS Rounded 1c", sans-serif';
+            g.fillText(`${main ? 'C' : ck.id}  保留+1`, x, cy + 9);
             if (f > 0) chakFlash[ck.id] = Math.max(0, f - 0.04);
         }
         // ねらう 位置
         const ax = l + (aimX - F.x) / F.w * (r - l);
-        g.fillStyle = '#ffd75e'; g.beginPath(); g.moveTo(ax - 8, wy - 54); g.lineTo(ax + 8, wy - 54); g.lineTo(ax, wy - 42); g.fill();
-        // 落ちて いる メダル (上段の 動く プッシャーの 上に 落ちる)
-        for (const m of inflight) { const k = m.t / 260, [x, y] = P3(m.x - F.x, P.pushers.upper.y * 0.5, P.P.HU + P.P.pushU.h + 70 * (1 - k)); medal(x, y, 9 + 3 * (1 - k)); }
+        g.fillStyle = '#ffd75e'; g.beginPath(); g.moveTo(ax - 8, wy - 58); g.lineTo(ax + 8, wy - 58); g.lineTo(ax, wy - 46); g.fill();
+        // 落ちて いる メダル: ▼ → チャッカーの 列 → (入れば 穴へ すいこまれる・入らなければ) 動く プッシャーの 上
+        for (const m of inflight) {
+            const k = m.t / 260, mx = l + (m.x - F.x) / F.w * (r - l);
+            const [px, py] = P3(m.x - F.x, P.pushers.upper.y * 0.5, P.P.HU + P.P.pushU.h);
+            if (k < 0.4) { const q = k / 0.4; medal(mx, wy - 50 + (cy - 5 - (wy - 50)) * q, 9); }
+            else if (m.chakker) { const q = Math.min(1, (k - 0.4) / 0.25); if (q < 1) medal(mx, cy - 5 + q * 3, 9 * (1 - q)); }
+            else { const q = (k - 0.4) / 0.6; medal(mx + (px - mx) * q, cy - 5 + (py - (cy - 5)) * q, 9 + 3 * q); }
+        }
         // チャッカー → 液晶の 保留ランプへ とぶ 光
         for (const f of [...holdFly]) {
             f.t += 16; const k = Math.min(1, f.t / 420), x1 = HOLD_X(f.i), y1 = LCD.y + LCD.h - 18;
@@ -932,6 +997,7 @@
     function popup(html, after) { $('modal-box').innerHTML = html; $('modal').hidden = false; if (after) after(); }
     function closePopup() { $('modal').hidden = true; }
     $('help-btn').addEventListener('click', () => popup(`<h2>遊び方</h2><ul>
+        <li>スマホは 横画面で 遊ぶ。縦向きの ままなら 画面ごと 横に なるので、スマホを 左に たおして 遊んでね。</li>
         <li>プッシャーの 上を タップ (クリック) すると、その 位置に メダルを 入れる。長押しで 連射。▼ が ねらう 位置。メダルは いちばん 上の 動く プッシャーの 上に 落ちて、前へ こぼれて いく。</li>
         <li>入れた メダルが 上の チャッカー (L・CENTER・R の 穴) を 通ると、入る ことが ある。入ると 保留が 1 つ ふえ、保留 1 つで 液晶スロットが 1 回 回る (保留は 4 個 まで。青 → 水色 → 金 で 期待度 アップ)。▼ が チャッカーの 上に あると 穴が 光る。</li>
         <li>スロットで ボールが 出ると、おかがっぱが ボールを 氷の 塔へ。どの 段にも 穴が 3 つ (払い出し・上へ・落下) あり、ボールが ころがって 止まった 穴で きまる。「上へ」なら つぎの 段へ、てっぺんまで 行くと JP ルーレット！</li>
