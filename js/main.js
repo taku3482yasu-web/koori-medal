@@ -1,10 +1,10 @@
 // 画面 (描く・さわる・演出の 順番・セーブ)
-// 左 = プッシャー (上は 液晶スロット)・右 = 氷の 塔・JP ルーレット・ビックボスメダルタワー
+// 横長・席に すわった 目線: 下 = プッシャー (遠近・立体の メダル)・上 = 液晶・左 = 氷の 塔・右 = JP ルーレットと ビックボスメダルタワー
 (() => {
     const C = CONFIG, F = C.field;
     const $ = id => document.getElementById(id);
     const cv = $('stage'), g = cv.getContext('2d');
-    const SAVE = 'koori-medal-save-v1';
+    const SAVE = 'koori-medal-save-v2';   // v2 = メダルの 物理を coin25d に した (2026-11-18)
     const params = new URLSearchParams(location.search);
     let s, P;
     let aimX = F.x + F.w / 2, holding = false, holdT = 0;
@@ -12,9 +12,15 @@
     const fx = [];         // 文字・つぶ
     let pending = 0;       // まだ 見せて いない 払い出し (塔・ルーレット・JP) → メダルの 数の 表示を おくらせる
     let t = 0, shake = 0, flash = 0;
-    const TOWER = { x: 520, w: 210, base: 592, stages: [480, 360, 240], top: 120 };
-    const RL = { x: 870, y: 470, r: 104 };
-    const BT = { x: 870, y: 300 };   // ビックボスメダルタワー
+    // 2026-11-18 ユーザー: 画面を すっきり。ふだんは 台と 液晶だけ。氷の 塔・ルーレットは 始まったら その 画面へ うつる
+    const TOWER = { x: 340, w: 320, base: 596, stages: [500, 386, 272], top: 168 };   // 氷の 塔の 画面
+    const RM = { x: 500, y: 352, rx: 360, q: 0.40 };                                  // ルーレットマシン (玉を 回して 入れる)
+    const LCD = { x: 290, y: 10, w: 420, h: 152 };
+    // ----- 遠近 (台の 座標 → 画面) -----
+    const PCX = 500, PYB = 252, PYF = 612, PWF = 900, ZK = 0.95;
+    const psc = t => 0.46 + 0.54 * t;
+    const ppy = t => PYB + (PYF - PYB) * (t * 1.5) / (1 + 0.5 * t);
+    const tFromY = y => { const k = Math.max(0, Math.min(1, (y - PYB) / (PYF - PYB))); return k / (1.5 - 0.5 * k); };
 
     // ----- セーブ -----
     function save() {
@@ -25,9 +31,14 @@
     }
     function start() {
         const v = !params.get('fresh') && load();
-        P = Pusher.create();
-        if (v) { s = v.s; s.shared.boss = null; P.restore(v.field); for (let i = 0; i < 30; i++) P.step(); P.take(); }
-        else { s = Game.newState(params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 2 ** 31)); P.fill(F.startUpper, F.startLower); }
+        P = Coin25D.create({ side: F.side, seed: (Math.random() * 2 ** 31) | 0, R: F.medalR, T: F.medalT, RB: F.ballR });
+        if (v) { s = v.s; s.shared.boss = null; P.restore(v.field); for (let i = 0; i < 40; i++) P.step(); P.take(); }
+        else {
+            s = Game.newState(params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 2 ** 31));
+            P.fill(F.startUpper, F.startLower);
+            for (let i = 0; i < C.fieldBall.start; i++) P.addBall(i < C.fieldBall.startSpecial ? 'sball' : 'cball', 60 + i * 100);
+            for (let i = 0; i < 90; i++) P.step(); P.take();
+        }
         if (params.get('medals')) s.seats[0].medals = Number(params.get('medals'));
         if (params.get('boss')) { s.shared.gauge = C.boss.gauge.full - 1; }
         if (params.get('ball')) s.seats[0].balls += Number(params.get('ball'));
@@ -55,17 +66,23 @@
             popup(`<h2>メダルが なくなった…</h2><p>ふるカワ「こおりくん、${C.freeMedals.give} 枚 わたすよ。もう 一度 がんばって！」</p><button class="big" id="free-ok">うけとる</button>`, () => { $('free-ok').onclick = () => { me().medals += C.freeMedals.give; noMedals.asked = false; closePopup(); save(); }; });
         }
     }
-    function fieldAt(x, y) { return x >= F.x - 10 && x <= F.x + F.w + 10 && y >= 0 && y <= F.lower.edge + 30; }
+    // 画面の 点 → ねらう 位置 (台の 前の 座標 F.x〜F.x+F.w)。台の 外なら null
+    function aimFrom(p) {
+        if (p.y < PYB - 40 || p.y > C.H) return null;
+        const tt = tFromY(p.y), u = (p.x - PCX) / (PWF * psc(tt)) + 0.5;
+        if (u < -0.06 || u > 1.06) return null;
+        return F.x + Math.max(12, Math.min(F.w - 12, u * F.w));
+    }
     function toStage(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * C.W / r.width, y: (e.clientY - r.top) * C.H / r.height }; }
     cv.addEventListener('pointerdown', e => {
         const p = toStage(e);
-        if (!fieldAt(p.x, p.y)) return;
-        aimX = Math.max(F.x + 12, Math.min(F.x + F.w - 12, p.x));
+        const a = aimFrom(p); if (a === null) return;
+        aimX = a;
         holding = true; holdT = 0;
         doInsert();
         cv.setPointerCapture(e.pointerId);
     });
-    cv.addEventListener('pointermove', e => { const p = toStage(e); if (holding || e.pointerType === 'mouse') { if (p.x >= F.x - 10 && p.x <= F.x + F.w + 10) aimX = Math.max(F.x + 12, Math.min(F.x + F.w - 12, p.x)); } });
+    cv.addEventListener('pointermove', e => { const p = toStage(e); if (holding || e.pointerType === 'mouse') { const a = aimFrom(p); if (a !== null) aimX = a; } });
     const stopHold = () => { holding = false; };
     cv.addEventListener('pointerup', stopHold); cv.addEventListener('pointercancel', stopHold);
     addEventListener('keydown', e => {
@@ -104,7 +121,8 @@
         } else if (slot.phase === 'show') {
             if (slot.t > (slot.sp.result === 'miss' ? 350 : 900)) {
                 const r = Game.applySpin(s, slot.sp);
-                if (r.spill) { P.spill(r.spill, 0); text(`+${r.spill} 枚 放出！`, F.x + F.w / 2, F.upper.top + 60, '#ffd75e', 22); }
+                if (r.spill) { P.spill(r.spill, 0); text(`+${r.spill} 枚 放出！`, PCX, PYB + 40, '#ffd75e', 22); }
+                if (r.fball) { P.addBall(r.fball); text(r.fball === 'sball' ? 'スペシャルボール 追加！' : 'こおりボール 追加！', PCX, PYB + 20, r.fball === 'sball' ? '#ffd75e' : '#8fdcff', 22); Sound.se('hit'); }
                 if (r.ball) { text('ボール ゲット！', TOWER.x + TOWER.w / 2, TOWER.base - 40, '#8fdcff', 20); }
                 if (r.bossStart) bossSelect();
                 slot.phase = 'idle';
@@ -116,6 +134,7 @@
     const tw = { phase: 'idle', run: null, t: 0, k: 0, cracks: 0 };
     function towerUpdate(dt) {
         if (tw.phase === 'idle') {
+            if (srJp && rl.phase === 'idle') { srJp = false; tw.phase = 'wait'; rouletteStart(); return; }
             if (me().balls <= 0 || rl.phase !== 'idle') return;
             tw.run = Game.tower(s);
             tw.t = 0; tw.k = -1; tw.phase = 'lift'; tw.cracks = 0;
@@ -146,32 +165,26 @@
         if (rl.res.kind === 'medals') pending += rl.res.medals;
         if (rl.res.kind === 'jp') pending += rl.res.pay;
         rl.phase = 'spin'; rl.t = 0;
-        const n = C.roulette.pockets.length, seg = Math.PI * 2 / n;
-        rl.from = rl.ang % (Math.PI * 2);
-        // ボールは 上 (−90°) で 止まる: 円盤を まわして ポケット idx を 上に
-        const target = -Math.PI / 2 - (rl.res.idx + 0.5) * seg;
-        rl.to = target - Math.PI * 2 * 6 - ((target - rl.from) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) + Math.PI * 2;
-        while (rl.to > rl.from - Math.PI * 2 * 5) rl.to -= Math.PI * 2;
+        rl.wheel = wheelNew(C.roulette.pockets.length, rl.res.idx);
         Sound.play('roulette');
     }
     function rouletteUpdate(dt) {
         if (rl.phase === 'idle') return;
         rl.t += dt;
         if (rl.phase === 'spin') {
-            const k = Math.min(1, rl.t / C.roulette.spinMs), e = 1 - Math.pow(1 - k, 3.2);
-            const prev = rl.ang;
-            rl.ang = rl.from + (rl.to - rl.from) * e;
-            const seg = Math.PI * 2 / C.roulette.pockets.length;
-            if (Math.floor(prev / seg) !== Math.floor(rl.ang / seg)) Sound.se('tick');
+            const k = Math.min(1, rl.t / C.roulette.spinMs);
+            wheelTick(rl.wheel, k);
             Sound.thin(1 - k * 0.8);
             if (k >= 1) {
                 rl.phase = 'result'; rl.t = 0; Sound.thin(1);
                 const r = rl.res;
                 if (r.kind === 'jp') { jpStart(r); }
                 else if (r.kind === 'again') { Sound.se('okagappa'); say('okagappa', 'もう 一回！', '#7fe0a0'); }
-                else { Sound.se('pay'); pending -= r.medals; text(`+${r.medals} 枚`, RL.x, RL.y - RL.r - 20, '#ffd75e', 26); }
+                else { Sound.se('pay'); pending -= r.medals; }
             }
-        } else if (rl.phase === 'result' && rl.t > (rl.res.kind === 'jp' ? 7000 : 1300)) {
+        } else if (rl.phase === 'result') {
+            wheelTick(rl.wheel, 1 + rl.t / C.roulette.spinMs);
+            if (rl.t < (rl.res.kind === 'jp' ? 7000 : 1800)) return;
             if (rl.res.kind === 'again') { rouletteStart(); return; }
             rl.phase = 'idle'; Sound.play(boss.phase === 'fight' ? 'boss' : 'normal');
         }
@@ -186,6 +199,178 @@
         let left = r.spill;
         const drop = () => { const n = Math.min(12, left); if (n > 0) { P.spill(n, 0); left -= n; setTimeout(drop, 120); } };
         setTimeout(drop, 1200);
+    }
+
+    // ----- 台の ボール と スペシャルルーレット -----
+    const sr = { phase: 'idle', res: null, t: 0, ang: 0, from: 0, to: 0, queue: [] };
+    function fieldBallDrop(kind) {
+        const r = Game.fieldBall(s, kind);
+        if (r.kind === 'medals' && !r.special) { Sound.se('pay'); text(`こおりボール +${r.medals} 枚`, PCX, PYF - 30, '#8fdcff', 24); say('koori', `ボールが 落ちた！ ${r.medals} 枚！`, '#8fdcff'); return; }
+        if (r.medals) pending += r.medals;
+        sr.queue.push(r);
+        say('okagappa', 'スペシャルボール！ スペシャルルーレット だ YO！', '#ffd75e'); Sound.se('okagappa');
+    }
+    function srUpdate(dt) {
+        if (sr.phase === 'idle') {
+            if (!sr.queue.length) return;
+            if (rl.phase !== 'idle' || (tw.phase !== 'idle' && tw.phase !== 'wait')) return;   // 塔・JP ルーレットの あとで
+            sr.res = sr.queue.shift(); sr.phase = 'spin'; sr.t = 0;
+            sr.wheel = wheelNew(C.specialRoulette.pockets.length, sr.res.idx);
+            return;
+        }
+        sr.t += dt;
+        if (sr.phase === 'spin') {
+            const k = Math.min(1, sr.t / C.specialRoulette.spinMs);
+            wheelTick(sr.wheel, k);
+            if (k >= 1) {
+                sr.phase = 'result'; sr.t = 0;
+                const r = sr.res;
+                if (r.kind === 'medals') { Sound.se('pay'); pending -= r.medals; }
+                else if (r.kind === 'ball') { Sound.se('hit'); say('okagappa', '氷の 塔の ボール ゲット！', '#7fe0a0'); }
+                else if (r.kind === 'boss') { Sound.se('roar'); say('furukawa', `ボスゲージ アップ！`, '#ff8a8a'); if (r.bossStart) bossSelect(); }
+                else { Sound.se('hit'); say('koori', 'JP ルーレットへ 直行だ！', '#ffd75e'); }
+            }
+        } else if (sr.phase === 'result') {
+            wheelTick(sr.wheel, 1 + sr.t / C.specialRoulette.spinMs);
+            if (sr.t < 1800) return;
+            if (sr.res.kind === 'jpc') srJp = true;
+            sr.phase = 'idle';
+        }
+    }
+    let srJp = false;   // スペシャルルーレットの「JP ルーレットへ」(塔と ルーレットが あいたら 回す)
+    // ===== ルーレットマシン (カジノの ように 玉を 回して ポケットに 入れる) =====
+    // 結果 (idx) は 先に きまって いる。円盤は 右回り・玉は 左回りで まわり、だんだん 内がわへ 落ちて idx に 入る
+    const KL = 0.78;   // 玉が ポケットに 入る とき (spinMs の 割合)
+    function wheelNew(n, idx) {
+        const seg = Math.PI * 2 / n, w0 = Math.random() * Math.PI * 2, W = Math.PI * 2 * 1.6;
+        const wAt = k => w0 + W * (1 - Math.pow(1 - Math.min(k, 1.6) / 1.6, 2));       // 円盤 (ゆっくり 止まる)
+        const land = wAt(KL) + (idx + 0.5) * seg;                                       // 入る ときの ポケットの 向き
+        const b0 = Math.random() * Math.PI * 2;
+        let B = b0 - land; B = ((B % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) + Math.PI * 2 * 7;   // 玉は 7 周 ちょっと
+        return { n, idx, seg, wAt, b0, B, w: w0, b: b0, r: 1, h: 1, last: 0, seated: false };
+    }
+    // k = 0〜1 (1 より 先は 止まった あと)。r = 半径の 割合 (1 = 外の みぞ)・h = 玉の 高さ
+    function wheelTick(W, k) {
+        W.w = W.wAt(k);
+        if (k < KL) {
+            const x = k / KL, e = 1 - Math.pow(1 - x, 2.2);
+            W.b = W.b0 - W.B * e;
+            if (x < 0.62) { W.r = 1; W.h = 1; }
+            else { const y = (x - 0.62) / 0.38; W.r = 1 - 0.36 * y * y + Math.sin(y * Math.PI * 4) * (1 - y) * 0.05; W.h = Math.abs(Math.sin(y * Math.PI * 4)) * (1 - y) * 0.8; }
+            const tick = Math.floor((W.b - W.w) / W.seg);
+            if (x > 0.62 && tick !== W.last) Sound.se('tick');
+            W.last = tick;
+        } else {
+            if (!W.seated) { W.seated = true; Sound.se('stop'); }
+            W.b = W.w + (W.idx + 0.5) * W.seg; W.r = 0.64; W.h = 0;
+        }
+    }
+    // 円盤の 上の 点 (a = 角度・r = 半径 px・z = 高さ px)
+    const WP = (a, r, z = 0) => [RM.x + Math.cos(a) * r, RM.y + Math.sin(a) * r * RM.q - z];
+    function ring(a0, a1, r0, r1, z0 = 0, z1 = z0) {
+        g.beginPath();
+        const st = Math.max(2, Math.ceil((a1 - a0) / 0.08));
+        for (let i = 0; i <= st; i++) { const [x, y] = WP(a0 + (a1 - a0) * i / st, r1, z1); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+        for (let i = st; i >= 0; i--) { const [x, y] = WP(a0 + (a1 - a0) * i / st, r0, z0); g.lineTo(x, y); }
+        g.closePath();
+    }
+    function drawWheelScene(kind) {
+        const jp = kind === 'jp', W = jp ? rl.wheel : sr.wheel;
+        const pockets = jp ? C.roulette.pockets : C.specialRoulette.pockets;
+        if (!W) return;
+        // 背景 (カジノ)
+        const bg = g.createRadialGradient(RM.x, RM.y, 40, RM.x, RM.y, 620); bg.addColorStop(0, jp ? '#123a2a' : '#2a1240'); bg.addColorStop(1, '#03060a');
+        g.fillStyle = bg; g.fillRect(0, 0, C.W, C.H);
+        for (let i = 0; i < 5; i++) { const x = 100 + i * 200, sp = g.createRadialGradient(x, -30, 4, x, -30, 240); sp.addColorStop(0, 'rgba(255,230,160,0.16)'); sp.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = sp; g.fillRect(x - 240, 0, 480, 280); }
+        // 題
+        g.textAlign = 'center'; g.fillStyle = '#ffd75e'; g.font = '30px "DotGothic16", monospace';
+        g.strokeStyle = '#000'; g.lineWidth = 5; const title = jp ? 'JP ルーレット' : 'スペシャルルーレット';
+        g.strokeText(title, RM.x, 46); g.fillText(title, RM.x, 46);
+        if (jp) { g.font = '16px "M PLUS Rounded 1c", sans-serif'; g.fillStyle = '#fff'; g.fillText(`こおりJP ${Math.floor(s.shared.jp).toLocaleString()} 枚`, RM.x, 74); }
+        const R0 = RM.rx;                         // 外わく
+        // 台 (木と 金の わく)
+        g.fillStyle = 'rgba(0,0,0,0.5)'; g.beginPath(); g.ellipse(RM.x, RM.y + 30, R0 + 20, (R0 + 20) * RM.q, 0, 0, 7); g.fill();
+        g.fillStyle = '#4a2a14'; g.beginPath(); g.ellipse(RM.x, RM.y + 16, R0, R0 * RM.q, 0, 0, 7); g.fill();
+        const wood = g.createLinearGradient(0, RM.y - R0 * RM.q, 0, RM.y + R0 * RM.q); wood.addColorStop(0, '#8a5a2a'); wood.addColorStop(1, '#5a3418');
+        g.fillStyle = wood; g.beginPath(); g.ellipse(RM.x, RM.y, R0, R0 * RM.q, 0, 0, 7); g.fill();
+        g.strokeStyle = '#e8c050'; g.lineWidth = 3; g.beginPath(); g.ellipse(RM.x, RM.y, R0 - 6, (R0 - 6) * RM.q, 0, 0, 7); g.stroke();
+        // 玉の みぞ (すりばち)
+        const RT = R0 - 22, RD = R0 - 70, RP1 = R0 - 96, RP0 = R0 - 150, RL0 = R0 - 214;
+        const bowl = g.createRadialGradient(RM.x, RM.y - 40, 40, RM.x, RM.y, R0); bowl.addColorStop(0, '#0e1c2c'); bowl.addColorStop(1, '#2a3a52');
+        g.fillStyle = bowl; g.beginPath(); g.ellipse(RM.x, RM.y, RT, RT * RM.q, 0, 0, 7); g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1; g.beginPath(); g.ellipse(RM.x, RM.y, RT - 8, (RT - 8) * RM.q, 0, 0, 7); g.stroke();
+        // ダイヤ (玉が はねる 金の かざり)
+        for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4 + 0.2, [x, y] = WP(a, RD + 14); g.fillStyle = '#ffe890'; g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 9, y); g.lineTo(x, y + 5); g.lineTo(x - 9, y); g.fill(); }
+        // まわる 円盤: ポケットと 文字
+        const n = pockets.length, seg = Math.PI * 2 / n;
+        const col = (v, i) => jp ? (v === 'jp' ? '#ffd75e' : v === 'again' ? '#1aa060' : i % 2 ? '#c02030' : '#16161e')
+                                 : (v === 'jpc' ? '#ffd75e' : v === 'ball' ? '#2a7ad0' : v === 'boss' ? '#c02030' : v >= 100 ? '#e8a020' : i % 2 ? '#5a2a90' : '#16161e');
+        const label = v => jp ? (v === 'jp' ? 'JP' : v === 'again' ? 'もう1回' : String(v)) : (v === 'jpc' ? 'JP' : v === 'ball' ? 'ボール' : v === 'boss' ? 'ボス' : String(v));
+        pockets.forEach((v, i) => {
+            const a0 = W.w + i * seg, a1 = a0 + seg;
+            ring(a0, a1, RP0, RP1, 6); g.fillStyle = col(v, i); g.fill();                                     // 文字の 帯
+            ring(a0, a1, RL0, RP0, 10, 6); g.fillStyle = col(v, i); g.fill(); g.fillStyle = 'rgba(0,0,0,0.35)'; g.fill();   // ポケット (くぼみ)
+            const [fx1, fy1] = WP(a0, RL0, 10), [fx2, fy2] = WP(a0, RP1, 6); g.strokeStyle = '#e8c050'; g.lineWidth = 2; g.beginPath(); g.moveTo(fx1, fy1); g.lineTo(fx2, fy2); g.stroke();   // 金の しきり
+            const am = a0 + seg / 2, [lx, ly] = WP(am, (RP0 + RP1) / 2, 6), front = Math.sin(am);
+            g.fillStyle = (jp && v === 'jp') || (!jp && v === 'jpc') ? '#6a3a00' : '#fff';
+            g.font = `bold ${Math.round((n > 16 ? 12 : 15) * (0.8 + 0.25 * front))}px "DotGothic16", monospace`; g.textAlign = 'center';
+            g.fillText(label(v), lx, ly + 4);
+        });
+        g.strokeStyle = '#e8c050'; g.lineWidth = 2; g.beginPath(); g.ellipse(RM.x, RM.y - 6, RP1, RP1 * RM.q, 0, 0, 7); g.stroke();
+        // まんなかの 塔 (こおりくん)
+        const cg = g.createRadialGradient(RM.x - 20, RM.y - 30, 6, RM.x, RM.y - 10, RL0); cg.addColorStop(0, '#fff8d0'); cg.addColorStop(0.5, '#e8c050'); cg.addColorStop(1, '#8a5a10');
+        g.fillStyle = cg; g.beginPath(); g.ellipse(RM.x, RM.y - 10, RL0, RL0 * RM.q, 0, 0, 7); g.fill();
+        for (let i = 0; i < 4; i++) { const a = W.w * 1 + i * Math.PI / 2, [x, y] = WP(a, RL0 * 0.8, 34); g.strokeStyle = '#ffe890'; g.lineWidth = 5; g.beginPath(); g.moveTo(RM.x, RM.y - 44); g.lineTo(x, y); g.stroke(); g.fillStyle = '#ffe890'; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); }
+        Art.draw(g, 'koori', RM.x, RM.y - 30, { height: 54, frame: Math.floor(t / 200) });
+        // 玉
+        const RPm = (RL0 + RP0) / 2 + 4, rr_ = W.r >= 1 ? RT - 20 : RPm + (RT - 20 - RPm) * Math.max(0, (W.r - 0.64) / 0.36), z = 6 + W.h * 26;
+        const [bx, by] = WP(W.b, rr_, z);
+        g.fillStyle = 'rgba(0,0,0,0.35)'; g.beginPath(); g.ellipse(bx, by + z * 0.9 + 4, 10, 4, 0, 0, 7); g.fill();
+        const bgd = g.createRadialGradient(bx - 4, by - 4, 1, bx, by, 11); bgd.addColorStop(0, '#ffffff'); bgd.addColorStop(0.6, '#e8eef6'); bgd.addColorStop(1, '#8a96a8');
+        g.fillStyle = bgd; g.beginPath(); g.arc(bx, by, 11, 0, 7); g.fill();
+        // 見て いる キャラ
+        Art.draw(g, 'okagappa', 80, 600, { height: 110, frame: Math.floor(t / 160) });
+        Art.draw(g, jp ? 'onioni' : 'koori', 920, 600, { height: 100, frame: Math.floor(t / 200), flip: true });
+        // 結果
+        const ph = jp ? rl.phase : sr.phase, res = jp ? rl.res : sr.res;
+        if (ph === 'result' && res) {
+            const v = pockets[res.idx];
+            const msg = jp ? (v === 'jp' ? 'こおりJP!!' : v === 'again' ? 'もう 1回！' : `${v} 枚`) : (v === 'jpc' ? 'JP ルーレットへ！' : v === 'ball' ? '塔の ボール ゲット！' : v === 'boss' ? 'ボスゲージ アップ！' : `${v} 枚`);
+            g.font = '44px "DotGothic16", monospace'; g.textAlign = 'center'; g.strokeStyle = '#000'; g.lineWidth = 7;
+            g.fillStyle = Math.floor(t / 200) % 2 ? '#ffd75e' : '#fff4c0'; g.strokeText(msg, RM.x, 560); g.fillText(msg, RM.x, 560);
+        }
+    }
+    // 氷の 塔の 画面
+    function drawTowerScene() {
+        const bg = g.createLinearGradient(0, 0, 0, C.H); bg.addColorStop(0, '#0a2a5a'); bg.addColorStop(1, '#04101e');
+        g.fillStyle = bg; g.fillRect(0, 0, C.W, C.H);
+        g.fillStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 50; i++) g.fillRect((i * 97 + t * 0.01 * (i % 3 + 1)) % C.W, (i * 53 + t * 0.03 * (i % 4 + 1)) % C.H, 2, 2);
+        g.fillStyle = 'rgba(143,220,255,0.08)';
+        for (const [x, w, h] of [[40, 70, 300], [120, 60, 220], [800, 70, 280], [880, 80, 340]]) { g.fillRect(x, C.H - h, w, h); g.beginPath(); g.moveTo(x - 4, C.H - h); g.lineTo(x + w / 2, C.H - h - 40); g.lineTo(x + w + 4, C.H - h); g.fill(); }
+        g.textAlign = 'center'; g.fillStyle = '#bff0ff'; g.font = '30px "DotGothic16", monospace'; g.strokeStyle = '#000'; g.lineWidth = 5;
+        g.strokeText('氷の 塔', 500, 46); g.fillText('氷の 塔', 500, 46);
+        g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillStyle = '#fff'; g.fillText('てっぺんまで 上れば JP ルーレット！', 500, 72);
+        drawTower();
+    }
+
+    // ----- クレーン (ボスを 倒すと ビックボスメダルタワーを 台へ はこび、爆散させる) -----
+    const crane = { phase: 'idle', t: 0, n: 0, left: 0 };
+    const TOWER_AT = { x: 210, y: 300 };   // 台の 上の 置き場所 (下段の まんなか)
+    function craneStart(n, left) { crane.phase = 'carry'; crane.t = 0; crane.n = n; crane.left = left; Sound.se('up'); }
+    function craneUpdate(dt) {
+        if (crane.phase === 'idle') return;
+        crane.t += dt;
+        if (crane.phase === 'carry' && crane.t > 2600) {
+            crane.phase = 'set'; crane.t = 0;
+            P.tower(TOWER_AT.x, TOWER_AT.y, crane.n); Sound.se('stop'); shake = 8;
+            say('koori', 'タワー とうちゃく！ …爆散するぞ！', '#ffd75e');
+        } else if (crane.phase === 'set' && crane.t > 1200) {
+            crane.phase = 'boom'; crane.t = 0;
+            P.explode(TOWER_AT.x, TOWER_AT.y, 64, 320); Sound.se('boom'); shake = 34; flash = 0.8;
+            let left = crane.left;
+            const drop = () => { const k = Math.min(10, left); if (k > 0) { P.spill(k, 1); left -= k; setTimeout(drop, 140); } };
+            setTimeout(drop, 300);
+        } else if (crane.phase === 'boom' && crane.t > 1200) crane.phase = 'idle';
     }
 
     // ----- ビックボスチャレンジ -----
@@ -206,15 +391,14 @@
         } else if (boss.phase === 'fight') {
             const res = Game.bossTick(s, dt / 1000);
             const B2 = s.shared.boss;
-            if (B2 && B2.hp < boss.lastHp - 0.5) { if (Math.random() < 0.5) Sound.se('attack'); boss.hits.push({ t: 0, x: BT.x + (Math.random() - 0.5) * 120, y: BT.y - 40 + (Math.random() - 0.5) * 80, n: Math.round(boss.lastHp - B2.hp) }); boss.lastHp = B2.hp; }
+            if (B2 && B2.hp < boss.lastHp - 0.5) { if (Math.random() < 0.5) Sound.se('attack'); boss.hits.push({ t: 0, x: 500 + (Math.random() - 0.5) * 160, y: 150 + (Math.random() - 0.5) * 80, n: Math.round(boss.lastHp - B2.hp) }); boss.lastHp = B2.hp; }
             if (res) {
                 boss.res = res; boss.phase = 'result'; boss.t = 0;
                 const n = res.rewards[0];
                 if (res.win) { Sound.se('boom'); Sound.se('win'); shake = 40; flash = 1; say('koori', `たおした！ メダルタワーが 爆散！ ${n} 枚！${res.mvp === 0 ? ' MVP で ボールも ゲット！' : ''}`, '#ffd75e'); }
                 else { Sound.se('lose'); say('furukawa', `時間 切れ… 残念賞 ${n} 枚`, '#9fb8d8'); }
-                let left = n;
-                const drop = () => { const k = Math.min(10, left); if (k > 0) { P.spill(k, 0); left -= k; setTimeout(drop, 140); } };
-                setTimeout(drop, res.win ? 900 : 300);
+                if (res.win) { const tn = Math.min(32, n); craneStart(tn, n - tn); }
+                else { let left = n; const drop = () => { const k = Math.min(10, left); if (k > 0) { P.spill(k, 0); left -= k; setTimeout(drop, 140); } }; setTimeout(drop, 300); }
             }
         } else if (boss.phase === 'result' && boss.t > 5000) { boss.phase = 'idle'; Sound.play('normal'); save(); }
     }
@@ -234,7 +418,11 @@
         while (acc >= 1000 / 60 && steps < 4) { P.step(1000 / 60); acc -= 1000 / 60; steps++; }
         if (steps >= 4) acc = 0;
         const ev = P.take();
-        if (ev.pay) { Game.payout(s, ev.pay); Sound.se('clink'); for (let i = 0; i < Math.min(ev.pay, 3); i++) fx.push({ coin: true, x: F.x + F.side + Math.random() * (F.w - F.side * 2), y: F.lower.edge, t: 0 }); }
+        if (ev.pay) { Game.payout(s, ev.pay); Sound.se('clink'); }
+        for (const b of ev.special) {
+            if (b.side) { P.addBall(b.kind); continue; }          // 左右の 穴に 落ちた ボールは 台に もどる
+            fieldBallDrop(b.kind);
+        }
         if (ev.drop) Sound.se('clink');
         if (holding) { holdT += dt; if (holdT >= C.autoMs) { holdT = 0; doInsert(); } }
         for (const m of [...inflight]) {
@@ -242,10 +430,10 @@
             if (m.t >= 260) {
                 inflight.splice(inflight.indexOf(m), 1);
                 if (m.chakker) { if (Game.chakker(s)) { Sound.se('chakker'); } chakFlash[m.chakker] = 1; if (s.shared.boss && s.shared.boss.started) Sound.se('attack'); }
-                P.insert(m.x);
+                P.insert(m.x - F.x);
             }
         }
-        slotUpdate(dt); towerUpdate(dt); rouletteUpdate(dt); bossUpdate(dt);
+        slotUpdate(dt); towerUpdate(dt); rouletteUpdate(dt); srUpdate(dt); bossUpdate(dt); craneUpdate(dt);
         if (jpFx) { jpFx.t += dt; if (jpFx.t > 7000) jpFx = null; }
         draw(dt);
         hud();
@@ -263,20 +451,46 @@
     function draw(dt) {
         g.save();
         if (shake > 0) { g.translate((Math.random() - 0.5) * shake * 0.5, (Math.random() - 0.5) * shake * 0.5); shake *= 0.9; if (shake < 0.5) shake = 0; }
-        drawBack();
-        drawLCD();
-        drawField();
-        drawInlet();
-        drawTower();
-        drawBigTower();
-        drawRoulette();
-        drawBoss();
+        // 画面の きりかえ: ふだんは 台。塔・ルーレットが 始まったら その 画面へ (ふわっと)
+        const want = wantView();
+        if (want !== view.name) {
+            if (view.name !== 'field' && want !== 'field') { view.name = want; flash = Math.max(flash, 0.5); }
+            else { view.k -= dt / 320; if (view.k <= 0) { view.k = 0; view.name = want; } }
+        } else if (view.name !== 'field') view.k = Math.min(1, view.k + dt / 320);
+        if (view.k < 1) {
+            drawBack();
+            drawLCD();
+            drawField();
+            drawInlet();
+            drawCrane();
+            drawChips();
+            drawBoss();
+        }
+        if (view.name !== 'field' && view.k > 0) {
+            g.save(); g.globalAlpha = view.k;
+            const z = 0.92 + 0.08 * view.k; g.translate(C.W / 2 * (1 - z), C.H / 2 * (1 - z)); g.scale(z, z);
+            if (view.name === 'tower') drawTowerScene(); else drawWheelScene(view.name === 'jpr' ? 'jp' : 'sp');
+            g.restore();
+        }
         drawFx(dt);
         drawTalk(dt);
         if (jpFx) drawJP();
         g.restore();
         if (flash > 0) { g.fillStyle = `rgba(255,255,255,${flash * 0.6})`; g.fillRect(0, 0, C.W, C.H); flash *= 0.92; if (flash < 0.02) flash = 0; }
         if (boss.dark) { g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(0, 0, C.W, C.H); }
+    }
+    const view = { name: 'field', k: 0 };
+    function wantView() {
+        if (tw.phase !== 'idle' && tw.phase !== 'wait') return 'tower';
+        if (rl.phase !== 'idle') return 'jpr';
+        if (sr.phase !== 'idle') return 'spr';
+        return 'field';
+    }
+    // ふだんの 画面の 小さな 表示 (左うえ: 塔の ボール・右うえ: 台の ボール)
+    function drawChips() {
+        const chip = (x, y, w, label, val, c) => { g.fillStyle = 'rgba(4,12,28,0.75)'; rr(x, y, w, 30, 15); g.fill(); g.strokeStyle = c; g.lineWidth = 1.5; g.stroke(); g.fillStyle = c; g.font = '12px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText(label, x + 34, y + 20); g.font = 'bold 16px "DotGothic16", monospace'; g.textAlign = 'right'; g.fillText(val, x + w - 12, y + 21); };
+        chip(14, 14, 200, '氷の塔 ボール', `×${me().balls}`, '#8fdcff'); ball3d(32, 29, 9, 'cball');
+        const bs = P.balls(); chip(786, 14, 200, '台の ボール', `${bs.filter(b => b.kind === 'sball').length}★ ${bs.filter(b => b.kind === 'cball').length}●`, '#ffd75e'); ball3d(804, 29, 9, 'sball');
     }
     function rr(x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
     function drawBack() {
@@ -286,28 +500,28 @@
         // 雪
         g.fillStyle = 'rgba(255,255,255,0.5)';
         for (let i = 0; i < 40; i++) g.fillRect((i * 97 + t * 0.01 * (i % 3 + 1)) % C.W, (i * 53 + t * 0.03 * (i % 4 + 1)) % C.H, 2, 2);
-        // 氷の 城の かげ (右うえ)
-        g.fillStyle = 'rgba(143,220,255,0.08)';
-        for (const [x, w, h] of [[760, 40, 200], [800, 60, 260], [860, 50, 300], [910, 60, 240], [960, 40, 180]]) { g.fillRect(x, 20 + 300 - h, w, h); g.beginPath(); g.moveTo(x - 4, 20 + 300 - h); g.lineTo(x + w / 2, 20 + 300 - h - 30); g.lineTo(x + w + 4, 20 + 300 - h); g.fill(); }
     }
     // 図柄
     function sym(id, x, y, sz) {
         if (['koori', 'onioni', 'okagappa'].includes(id)) { Art.draw(g, id, x, y + sz * 0.45, { height: sz * 0.9 }); return; }
         g.save(); g.translate(x, y);
         if (id === 'ball') { const gr = g.createRadialGradient(-sz * 0.12, -sz * 0.12, 2, 0, 0, sz * 0.35); gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#2a8ae0'); g.fillStyle = gr; g.beginPath(); g.arc(0, 0, sz * 0.33, 0, 7); g.fill(); }
+        else if (id === 'fball') { const gr = g.createRadialGradient(-sz * 0.12, -sz * 0.12, 2, 0, 0, sz * 0.35); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.4, '#ffe070'); gr.addColorStop(1, '#b07010'); g.fillStyle = gr; g.beginPath(); g.arc(0, 0, sz * 0.33, 0, 7); g.fill(); g.fillStyle = '#fff'; g.font = `bold ${sz * 0.3}px "DotGothic16", monospace`; g.textAlign = 'center'; g.fillText('★', 0, sz * 0.1); }
         else if (id === 'boss') { g.fillStyle = '#c02030'; rr(-sz * 0.38, -sz * 0.3, sz * 0.76, sz * 0.6, 8); g.fill(); g.fillStyle = '#fff'; g.font = `bold ${sz * 0.26}px "DotGothic16", monospace`; g.textAlign = 'center'; g.fillText('BOSS', 0, sz * 0.09); }
         else if (id === 'ice') { g.fillStyle = '#bff0ff'; g.beginPath(); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; g.lineTo(Math.cos(a) * sz * 0.34, Math.sin(a) * sz * 0.34); } g.fill(); g.fillStyle = '#4aa8e0'; g.fillRect(-2, -sz * 0.3, 4, sz * 0.6); }
         else { const n = id.slice(1); g.fillStyle = '#e8c040'; g.beginPath(); g.arc(0, 0, sz * 0.33, 0, 7); g.fill(); g.fillStyle = '#fff4b0'; g.beginPath(); g.arc(-3, -3, sz * 0.22, 0, 7); g.fill(); g.fillStyle = '#6a4a00'; g.font = `bold ${sz * 0.28}px "DotGothic16", monospace`; g.textAlign = 'center'; g.fillText(n, 0, sz * 0.1); }
         g.restore();
     }
     function drawLCD() {
-        const x = 40, y = 8, w = 420, h = 108;
-        g.fillStyle = '#1a2a4a'; rr(x - 4, y - 4, w + 8, h + 8, 12); g.fill();
+        const { x, y, w, h } = LCD;
+        const bz = g.createLinearGradient(0, y - 10, 0, y + h + 10); bz.addColorStop(0, '#ffe890'); bz.addColorStop(1, '#a07010');
+        g.fillStyle = '#05070c'; rr(x - 10, y - 10, w + 20, h + 20, 14); g.fill();
+        g.strokeStyle = bz; g.lineWidth = 3; rr(x - 10, y - 10, w + 20, h + 20, 14); g.stroke();
         const gr = g.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#0e2c5a'); gr.addColorStop(1, '#081830');
         g.fillStyle = gr; rr(x, y, w, h, 10); g.fill();
         // リール
         for (let i = 0; i < 3; i++) {
-            const rx = x + 14 + i * 96, ry = y + 10, rw = 88, rh = 76;
+            const rx = x + 14 + i * 96, ry = y + 24, rw = 88, rh = 84;
             g.fillStyle = '#eaf6ff'; rr(rx, ry, rw, rh, 8); g.fill();
             g.save(); rr(rx, ry, rw, rh, 8); g.clip();
             if (slot.phase === 'spin' && !slot.shown[i]) {
@@ -321,9 +535,9 @@
             if (slot.phase === 'spin' && slot.shown[0] && slot.shown[1] && slot.shown[0] === slot.shown[1] && !slot.shown[2] && i === 2) { g.strokeStyle = `hsl(${t / 3 % 360},90%,60%)`; g.lineWidth = 4; rr(rx, ry, rw, rh, 8); g.stroke(); }
         }
         // 当たり
-        if (slot.phase === 'show' && slot.sp && slot.sp.result !== 'miss') { g.strokeStyle = '#ffd75e'; g.lineWidth = 5; rr(x + 10, y + 6, 292, 84, 10); g.stroke(); }
+        if (slot.phase === 'show' && slot.sp && slot.sp.result !== 'miss') { g.strokeStyle = '#ffd75e'; g.lineWidth = 5; rr(x + 10, y + 20, 292, 92, 10); g.stroke(); }
         // 右の キャラ (通常は こおりくん・チャンスで おかがっぱ・バトルで おにおに)
-        const cx = x + 350, cy = y + 88;
+        const cx = x + 360, cy = y + h - 22;
         if (slot.phase === 'battle') {
             Art.draw(g, 'koori', cx - 18, cy, { height: 40, frame: Math.floor(t / 150) });
             Art.draw(g, 'onioni', cx + 30, cy, { height: 50, frame: Math.floor(t / 120), flip: true });
@@ -333,57 +547,123 @@
         else Art.draw(g, 'koori', cx, cy, { height: 46, frame: Math.floor(t / 400) });
         // 保留 (青 → 水色 → 金)
         const col = { blue: '#3a7ae0', aqua: '#6ae8ff', gold: '#ffd75e' };
-        me().hold.forEach((c, i) => { g.fillStyle = col[c]; g.beginPath(); g.arc(x + 30 + i * 22, y + h - 9, 7, 0, 7); g.fill(); });
-        g.fillStyle = 'rgba(255,255,255,0.4)'; g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText('保留', x + 120, y + h - 5);
+        me().hold.forEach((c, i) => { g.fillStyle = col[c]; g.beginPath(); g.arc(x + 30 + i * 22, y + h - 18, 7, 0, 7); g.fill(); });
+        g.fillStyle = 'rgba(255,255,255,0.5)'; g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText('保留', x + 120, y + h - 14);
     }
+    // ----- 台 (遠近) -----
+    const FW = () => P.P.FW, LE = () => P.P.LE;
+    const tOf = y => Math.max(0, (y + 10) / (LE() + 10));
+    const sOf = tt => PWF * psc(tt) / FW();
+    function P3(x, y, z) { const tt = tOf(y); return [PCX + (x / FW() - 0.5) * PWF * psc(tt), ppy(tt) - z * sOf(tt) * ZK]; }
+    function poly(pts, fill) { g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fillStyle = fill; g.fill(); }
+    const top3 = (y0, y1, z, x0 = 0, x1 = FW()) => [P3(x0, y0, z), P3(x1, y0, z), P3(x1, y1, z), P3(x0, y1, z)];
+    const face3 = (y, z0, z1) => [P3(0, y, z1), P3(FW(), y, z1), P3(FW(), y, z0), P3(0, y, z0)];
+    // うしろの かべ (チャッカー)・ねらう 位置・入れた メダル
     function drawInlet() {
-        const y0 = 122, y1 = F.upper.top;
-        g.fillStyle = '#1c3c6a'; g.fillRect(F.x, y0, F.w, y1 - y0);
+        const wy = P3(0, 0, P.P.HU + P.P.pushU.h)[1], l = PCX - PWF * psc(0) / 2, r = PCX + PWF * psc(0) / 2;
+        g.fillStyle = '#0e2448'; g.beginPath(); g.moveTo(l - 10, wy - 40); g.lineTo(r + 10, wy - 40); g.lineTo(r, wy); g.lineTo(l, wy); g.closePath(); g.fill();
+        g.strokeStyle = '#8fdcff'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(l - 10, wy - 40); g.lineTo(r + 10, wy - 40); g.stroke();
         for (const ck of C.chakkers) {
-            const cx = F.x + ck.x, f = chakFlash[ck.id] || 0;
-            g.fillStyle = f > 0 ? `rgba(255,215,94,${0.5 + f * 0.5})` : '#0a1830';
-            rr(cx - ck.w / 2, C.chakkerY - 12, ck.w, 22, 8); g.fill();
-            g.strokeStyle = ck.id === 'C' ? '#ffd75e' : '#8fdcff'; g.lineWidth = 2; g.stroke();
-            g.fillStyle = '#fff'; g.font = '10px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText(ck.id === 'C' ? 'CENTER' : ck.id, cx, C.chakkerY + 3);
+            const cx = l + ck.x / F.w * (r - l), w = ck.w / F.w * (r - l) * 1.3, f = chakFlash[ck.id] || 0, main = ck.id === 'C';
+            g.fillStyle = f > 0 ? `rgba(255,215,94,${0.5 + f * 0.5})` : '#02060e';
+            rr(cx - w / 2, wy - 32, w, 18, 8); g.fill();
+            g.strokeStyle = main ? '#ffd75e' : '#8fdcff'; g.lineWidth = 2; g.stroke();
+            g.fillStyle = main ? '#ffd75e' : '#8fdcff'; g.font = '9px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText(main ? 'CENTER' : ck.id, cx, wy - 20);
             if (f > 0) chakFlash[ck.id] = Math.max(0, f - 0.04);
         }
         // ねらう 位置
-        g.fillStyle = '#ffd75e';
-        g.beginPath(); g.moveTo(aimX - 8, y0 + 2); g.lineTo(aimX + 8, y0 + 2); g.lineTo(aimX, y0 + 14); g.fill();
+        const ax = l + (aimX - F.x) / F.w * (r - l);
+        g.fillStyle = '#ffd75e'; g.beginPath(); g.moveTo(ax - 8, wy - 54); g.lineTo(ax + 8, wy - 54); g.lineTo(ax, wy - 42); g.fill();
         // 落ちて いる メダル
-        for (const m of inflight) { const k = m.t / 260; medal(m.x, y0 + 4 + k * (y1 - y0 + 10), F.medalR * (1.2 - k * 0.2)); }
+        for (const m of inflight) { const k = m.t / 260, [x, y] = P3(m.x - F.x, P.pushers.upper.y + 12, P.P.HU + 70 * (1 - k)); medal(x, y, 9 + 3 * (1 - k)); }
     }
+    // 平らな メダル (画面の 小物用)
     function medal(x, y, r, kind) {
-        g.fillStyle = kind === 'ball' ? '#3a9ae8' : '#c8ced8'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
-        g.fillStyle = kind === 'ball' ? '#bfe8ff' : '#f4f8ff'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.45, 0, 7); g.fill();
-        g.strokeStyle = 'rgba(60,70,90,0.6)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r - 0.5, 0, 7); g.stroke();
+        if (kind === 'ball') { ball3d(x, y, r, 'cball'); return; }
+        g.fillStyle = '#5a6474'; g.beginPath(); g.ellipse(x, y + r * 0.25, r, r * 0.55, 0, 0, 7); g.fill();
+        g.fillStyle = '#c8ced8'; g.beginPath(); g.ellipse(x, y, r, r * 0.55, 0, 0, 7); g.fill();
+        g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 1; g.beginPath(); g.ellipse(x, y, r * 0.7, r * 0.38, 0, Math.PI, Math.PI * 1.8); g.stroke();
+    }
+    // 立体の メダル (厚み・ふちの ぎざぎざ・刻印・かたむき)
+    // 絵は 大きさ・つぶれ具合ごとに 先に 描いて おいて 使い回す (毎回 グラデーションを 作ると おそい)
+    const coinCache = new Map();
+    function coinSprite(gold, r, k) {
+        const rq = Math.round(r * 2) / 2, kq = Math.round(k * 20) / 20, key = `${gold ? 1 : 0}|${rq}|${kq}`;
+        let sp = coinCache.get(key);
+        if (sp) return sp;
+        const th = P.P.T * (rq / P.P.R) * ZK + 0.6, ry = rq * kq, S = 2, pad = 4;
+        const w = Math.ceil(rq * 2 + pad * 2), h = Math.ceil(ry * 2 + th + pad * 2 + 3);
+        const cv2 = document.createElement('canvas'); cv2.width = w * S; cv2.height = h * S;
+        const q = cv2.getContext('2d'); q.scale(S, S); q.translate(w / 2, pad + ry + th);
+        const C0 = gold ? ['#fff3b0', '#e8b020', '#8a5a08', '#5a3a04'] : ['#ffffff', '#c4ccd8', '#6a7484', '#3a4250'], r_ = rq;
+        q.fillStyle = 'rgba(0,0,0,0.30)'; q.beginPath(); q.ellipse(1.5, 2.6, r_ * 1.02, ry * 1.08 + 0.5, 0, 0, 7); q.fill();   // かげ
+        const sg = q.createLinearGradient(-r_, 0, r_, 0); sg.addColorStop(0, C0[3]); sg.addColorStop(0.35, C0[1]); sg.addColorStop(0.6, C0[2]); sg.addColorStop(1, C0[3]);
+        q.fillStyle = sg; q.beginPath(); q.ellipse(0, 0, r_, ry, 0, 0, Math.PI); q.lineTo(-r_, -th); q.ellipse(0, -th, r_, ry, 0, Math.PI, 0, true); q.closePath(); q.fill();
+        if (r_ > 6) { q.strokeStyle = 'rgba(0,0,0,0.28)'; q.lineWidth = 0.8; q.beginPath(); for (let i = -6; i <= 6; i++) { const xx = r_ * Math.sin(i * 0.24), yy = ry * Math.sqrt(Math.max(0, 1 - (xx / r_) ** 2)); q.moveTo(xx, yy - th); q.lineTo(xx, yy); } q.stroke(); }
+        const fg = q.createLinearGradient(-r_ * 0.7, -th - ry, r_ * 0.7, -th + ry); fg.addColorStop(0, C0[0]); fg.addColorStop(0.5, C0[1]); fg.addColorStop(1, C0[2]);
+        q.fillStyle = fg; q.beginPath(); q.ellipse(0, -th, r_, ry, 0, 0, 7); q.fill();
+        // ふちの 段 (内がわが 一段 低い: 上が かげ・下が ひかり)
+        q.lineWidth = Math.max(0.9, r_ * 0.07);
+        q.strokeStyle = gold ? 'rgba(100,55,0,0.6)' : 'rgba(40,48,62,0.55)'; q.beginPath(); q.ellipse(0, -th, r_ * 0.8, ry * 0.8, 0, Math.PI, Math.PI * 2); q.stroke();
+        q.strokeStyle = 'rgba(255,255,255,0.75)'; q.beginPath(); q.ellipse(0, -th, r_ * 0.8, ry * 0.8, 0, 0, Math.PI); q.stroke();
+        const inner = q.createLinearGradient(0, -th - ry * 0.8, 0, -th + ry * 0.8); inner.addColorStop(0, gold ? '#d8a020' : '#a8b2c0'); inner.addColorStop(1, gold ? '#f8d870' : '#dde3ec');
+        q.fillStyle = inner; q.beginPath(); q.ellipse(0, -th, r_ * 0.76, ry * 0.76, 0, 0, 7); q.fill();
+        // 刻印 (雪の 結晶・うき彫り: かげ + ひかり)
+        if (r_ > 7) {
+            const flake = (dx, dy, col) => { q.strokeStyle = col; q.lineWidth = Math.max(0.8, r_ * 0.08); q.lineCap = 'round'; q.beginPath(); for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3, cx = Math.cos(a), sy = Math.sin(a); q.moveTo(dx - cx * r_ * 0.5, -th + dy - sy * ry * 0.5); q.lineTo(dx + cx * r_ * 0.5, -th + dy + sy * ry * 0.5); for (const sgn of [-1, 1]) { const bx = dx + sgn * cx * r_ * 0.3, by = -th + dy + sgn * sy * ry * 0.3; q.moveTo(bx, by); q.lineTo(bx + Math.cos(a + 0.7) * r_ * 0.12 * sgn, by + Math.sin(a + 0.7) * ry * 0.12 * sgn); } } q.stroke(); };
+            flake(0.6, 0.8, gold ? 'rgba(110,60,0,0.45)' : 'rgba(40,48,62,0.45)');
+            flake(0, 0, gold ? 'rgba(255,250,215,0.95)' : 'rgba(255,255,255,0.95)');
+            q.lineCap = 'butt';
+        }
+        q.strokeStyle = 'rgba(255,255,255,0.9)'; q.lineWidth = Math.max(1, r_ * 0.1); q.beginPath(); q.ellipse(0, -th, r_ * 0.92, ry * 0.92, 0, Math.PI * 1.1, Math.PI * 1.5); q.stroke();
+        const spec = q.createRadialGradient(-r_ * 0.35, -th - ry * 0.4, 0, -r_ * 0.35, -th - ry * 0.4, r_ * 0.7); spec.addColorStop(0, 'rgba(255,255,255,0.55)'); spec.addColorStop(1, 'rgba(255,255,255,0)');
+        q.fillStyle = spec; q.beginPath(); q.ellipse(0, -th, r_, ry, 0, 0, 7); q.fill();
+        sp = { cv: cv2, w, h, ox: w / 2, oy: pad + ry + th };
+        coinCache.set(key, sp);
+        return sp;
+    }
+    // 立体の メダル (厚み・ふちの ぎざぎざ・刻印・かたむき)
+    function coin3d(c) {
+        const tt = tOf(c.y), sc = sOf(tt), [x, y] = P3(c.x, c.y, c.z);
+        let k = 0.30 + 0.24 * tt + c.ty * 0.9, rot = c.tx * 0.75;
+        if (!c.on) { k = 0.3 + Math.abs(Math.sin(c.spin)) * 0.6; rot += Math.sin(c.spin * 0.7) * 0.4; }
+        k = Math.max(0.1, Math.min(0.95, k));
+        const sp = coinSprite(c.kind === 'gold', P.P.R * sc, k);
+        if (Math.abs(rot) < 0.03) { g.drawImage(sp.cv, x - sp.ox, y - sp.oy, sp.w, sp.h); return; }
+        g.save(); g.translate(x, y); g.rotate(rot); g.drawImage(sp.cv, -sp.ox, -sp.oy, sp.w, sp.h); g.restore();
+    }
+    // 台の ボール (こおりボール = 水色・スペシャルボール = 金)
+    function ball3d(x, y, r, kind) {
+        const sp = kind === 'sball';
+        g.fillStyle = 'rgba(0,0,0,0.3)'; g.beginPath(); g.ellipse(x, y + r * 0.85, r * 0.9, r * 0.3, 0, 0, 7); g.fill();
+        const gr = g.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
+        gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.35, sp ? '#ffe070' : '#9ae8ff'); gr.addColorStop(1, sp ? '#b07010' : '#1a78c8');
+        g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+        if (sp) { g.fillStyle = '#ffffff'; g.font = `bold ${Math.round(r)}px "DotGothic16", monospace`; g.textAlign = 'center'; g.fillText('★', x, y + r * 0.35); }
+        else { g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = Math.max(1, r * 0.1); g.beginPath(); for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3; g.moveTo(x - Math.cos(a) * r * 0.5, y - Math.sin(a) * r * 0.5); g.lineTo(x + Math.cos(a) * r * 0.5, y + Math.sin(a) * r * 0.5); } g.stroke(); }
     }
     function drawField() {
-        for (const [i, st] of [[0, F.upper], [1, F.lower]]) {
-            const gr = g.createLinearGradient(0, st.top, 0, st.edge);
-            gr.addColorStop(0, i ? '#2a6aa8' : '#3a7ab8'); gr.addColorStop(1, i ? '#1a4a80' : '#2a5a90');
-            g.fillStyle = gr; g.fillRect(F.x, st.top, F.w, st.edge - st.top);
-            g.fillStyle = 'rgba(191,240,255,0.25)'; g.fillRect(F.x, st.edge - 3, F.w, 3);
+        const PP = P.P, pu = P.pushers.upper, pl = P.pushers.lower, hU = PP.pushU.h, hL = PP.pushL.h;
+        poly(top3(PP.UE, PP.LE, 0), '#1e5aa0');                                                    // 下段の 台
+        if (F.side) { poly(top3(PP.LE - 22, PP.LE, 0, 0, F.side), '#02050c'); poly(top3(PP.LE - 22, PP.LE, 0, FW() - F.side, FW()), '#02050c'); }   // 店の 穴
+        poly(top3(PP.LE - 4, PP.LE, 0, F.side, FW() - F.side), 'rgba(191,240,255,0.55)');          // 手前の はし
+        poly(top3(0, PP.UE, PP.HU), '#2a6ab0');                                                   // 上段の 台
+        poly(top3(0, pu.y, PP.HU + hU), '#d8eeff'); poly(face3(pu.y, PP.HU, PP.HU + hU), '#7ab0e0');
+        poly(face3(PP.UE, 0, PP.HU), '#123a70');                                                  // 上段の 前の かべ
+        poly(top3(PP.UE, pl.y, hL), '#c0e0fa'); poly(face3(pl.y, 0, hL), '#6aa0d8');
+        const list = P.coins.slice().sort((a, b) => (a.y + a.z * 1.2) - (b.y + b.z * 1.2));
+        for (const c of list) {
+            if (c.ball) { const tt = tOf(c.y), [x, y] = P3(c.x, c.y, c.z + c.r); ball3d(x, y, c.r * sOf(tt), c.kind); }
+            else coin3d(c);
         }
-        // 下段の 落とし穴 (左右)
-        g.fillStyle = '#04080f'; g.fillRect(F.x, F.lower.edge - 6, F.side, 30); g.fillRect(F.x + F.w - F.side, F.lower.edge - 6, F.side, 30);
-        // 払い出し口
-        g.fillStyle = '#ffd75e33'; g.fillRect(F.x + F.side, F.lower.edge, F.w - F.side * 2, C.H - F.lower.edge);
-        g.fillStyle = '#ffd75e'; g.font = '12px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText('▼ 払い出し ▼', F.x + F.w / 2, C.H - 10);
-        // かべ
-        g.fillStyle = '#5a7aa8'; g.fillRect(F.x - 8, 122, 8, F.lower.edge - 122); g.fillRect(F.x + F.w, 122, 8, F.lower.edge - 122);
-        // メダル (上段 → 下段)
-        for (const b of P.medals) medal(b.position.x, b.position.y, b.circleRadius, b.plugin.kind);
-        // プッシャー
-        for (const p of P.pushers) {
-            const b = p.body, y = b.position.y - p.st.plate / 2;
-            g.fillStyle = '#9ac8f0'; g.fillRect(F.x, p.st.top - 40, F.w, y - p.st.top + 40);
-            const gr = g.createLinearGradient(0, y, 0, y + p.st.plate); gr.addColorStop(0, '#d8f0ff'); gr.addColorStop(1, '#6aa0d8');
-            g.fillStyle = gr; g.fillRect(F.x, y, F.w, p.st.plate);
-            g.fillStyle = '#ffffff55'; for (let k = 0; k < 6; k++) g.fillRect(F.x + 20 + k * 70, y + 6, 40, 4);
+        // 左右の 金の かべと LED
+        for (const sd of [0, 1]) {
+            const u = sd ? FW() : 0, e = sd ? C.W : 0;
+            const [x0, y0] = P3(u, 0, 0), [x1, y1] = P3(u, LE(), 0);
+            const gr = g.createLinearGradient(e, 0, x0, 0); gr.addColorStop(0, '#6a4a10'); gr.addColorStop(0.6, '#e8c050'); gr.addColorStop(1, '#fff0a8');
+            g.fillStyle = gr; g.beginPath(); g.moveTo(x0, y0 - 40); g.lineTo(x0, y0); g.lineTo(x1, y1); g.lineTo(x1 + (sd ? 40 : -40), y1); g.lineTo(x0 + (sd ? 26 : -26), y0 - 40); g.closePath(); g.fill();
+            for (let i = 0; i <= 10; i++) { const [lx, ly] = P3(u, i / 10 * LE(), 0); g.fillStyle = ['#ff5ab0', '#ffd75e', '#6ae8ff'][(i + Math.floor(t / 250)) % 3]; g.beginPath(); g.arc(lx + (sd ? 12 : -12), ly - 6, 2.4, 0, 7); g.fill(); }
         }
-        // 入り口の 帯 (プッシャーの うえを 隠す)
-        g.fillStyle = '#1c3c6a'; g.fillRect(F.x, 122, F.w, F.upper.top - 122 + 2);
     }
     function drawTower() {
         const T = TOWER, cx = T.x + T.w / 2;
@@ -423,74 +703,76 @@
             Art.draw(g, 'koori', bx + 22, by + 12, { height: 30, frame: Math.floor(t / 150) });
         }
     }
-    // 中央の ビックボスメダルタワー (ゲージで 少しずつ 積み上がる。ボスを 倒すと 爆散)
-    function drawBigTower() {
-        const k = s.shared.boss ? 1 : Math.min(1, s.shared.gauge / C.boss.gauge.full);
-        const exploded = boss.phase === 'result' && boss.res && boss.res.win;
-        const n = exploded ? 0 : Math.round(4 + k * 26);
-        for (let i = 0; i < n; i++) { const y = BT.y + 20 - i * 6; g.fillStyle = i % 2 ? '#e8c040' : '#d0a830'; g.beginPath(); g.ellipse(BT.x, y, 26, 6, 0, 0, 7); g.fill(); }
-        if (exploded) {
-            for (let i = 0; i < 40; i++) { const a = i * 2.4, d = boss.t * 0.25 * (0.5 + (i % 5) / 5); medal(BT.x + Math.cos(a) * d, BT.y - 40 + Math.sin(a) * d * 0.6 + boss.t * 0.03 * (i % 3), 6); }
+    // ビックボスメダルタワー (右うえ・ゲージで 積み上がる)。ボスを 倒すと クレーンで 台へ はこぶ
+    function stack(x, y, n, r) {
+        for (let i = 0; i < n; i++) {
+            const yy = y - i * r * 0.32, gold = i % 6 === 5;
+            g.fillStyle = gold ? '#8a5a08' : '#4a5260'; g.beginPath(); g.ellipse(x, yy + r * 0.12, r, r * 0.3, 0, 0, 7); g.fill();
+            const gr = g.createLinearGradient(x - r, 0, x + r, 0); gr.addColorStop(0, gold ? '#fff0a0' : '#ffffff'); gr.addColorStop(0.5, gold ? '#e0a820' : '#b8c0cc'); gr.addColorStop(1, gold ? '#8a5a08' : '#5a6474');
+            g.fillStyle = gr; g.beginPath(); g.ellipse(x, yy, r, r * 0.3, 0, 0, 7); g.fill();
         }
-        g.fillStyle = '#ff8a8a'; g.font = '11px "DotGothic16", monospace'; g.textAlign = 'center';
-        g.fillText('ビックボスメダルタワー', BT.x, BT.y + 44);
     }
-    function drawRoulette() {
-        const P_ = C.roulette.pockets, n = P_.length, seg = Math.PI * 2 / n;
-        g.save(); g.translate(RL.x, RL.y);
-        g.fillStyle = '#0a1830'; g.beginPath(); g.arc(0, 0, RL.r + 10, 0, 7); g.fill();
-        g.rotate(rl.ang);
-        P_.forEach((v, i) => {
-            g.fillStyle = v === 'jp' ? '#ffd75e' : v === 'again' ? '#7fe0a0' : i % 2 ? '#2a5a90' : '#3a7ab8';
-            g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, RL.r, i * seg, (i + 1) * seg); g.fill();
-            g.save(); g.rotate((i + 0.5) * seg); g.fillStyle = v === 'jp' ? '#6a3a00' : '#fff'; g.font = `${v === 'jp' ? 'bold 12' : '10'}px "DotGothic16", monospace`; g.textAlign = 'right';
-            g.fillText(v === 'jp' ? 'JP' : v === 'again' ? 'もう1' : v, RL.r - 6, 4); g.restore();
-        });
-        g.restore();
-        g.fillStyle = '#bff0ff'; g.beginPath(); g.arc(RL.x, RL.y, 26, 0, 7); g.fill();
-        Art.draw(g, 'koori', RL.x, RL.y + 18, { height: 30 });
-        // ボール (上で 止まる)
-        if (rl.phase !== 'idle') medal(RL.x, RL.y - RL.r + 10, 9, 'ball');
-        g.fillStyle = '#ffd75e'; g.beginPath(); g.moveTo(RL.x - 8, RL.y - RL.r - 14); g.lineTo(RL.x + 8, RL.y - RL.r - 14); g.lineTo(RL.x, RL.y - RL.r - 2); g.fill();
-        g.font = '12px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText('JP ルーレット', RL.x, RL.y + RL.r + 24);
+    function drawCrane() {
+        // クレーン
+        if (crane.phase === 'idle') return;
+        const [fx, fy] = P3(TOWER_AT.x, TOWER_AT.y, 0);
+        let x = fx, y = fy, hold = true;
+        if (crane.phase === 'carry') { const e = Math.min(1, crane.t / 2400), ee = e * e * (3 - 2 * e); x = fx; y = -60 + (fy + 60) * ee; }   // 天井から おりて くる
+        else hold = crane.phase === 'set' && crane.t < 300;
+        const sc = sOf(tOf(TOWER_AT.y)), r = P.P.R * sc, top = y - crane.n * r * 0.32 - 16;
+        const hy = hold ? top : Math.max(14, top - (crane.t - 300) * 0.3);
+        // レール
+        g.fillStyle = '#3a3a44'; g.fillRect(0, 0, C.W, 12);
+        for (let i = 0; i < 26; i++) { g.fillStyle = i % 2 ? '#ffd030' : '#1a1a1a'; g.beginPath(); g.moveTo(i * 40, 12); g.lineTo(i * 40 + 20, 0); g.lineTo(i * 40 + 40, 0); g.lineTo(i * 40 + 20, 12); g.fill(); }
+        g.strokeStyle = '#c8d0dc'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(x - 5, 12); g.lineTo(x - 5, hy - 14); g.moveTo(x + 5, 12); g.lineTo(x + 5, hy - 14); g.stroke();
+        g.fillStyle = '#ffd030'; rr(x - 22, hy - 24, 44, 18, 5); g.fill(); g.strokeStyle = '#1a1a1a'; g.lineWidth = 1.5; rr(x - 22, hy - 24, 44, 18, 5); g.stroke();
+        if (crane.phase === 'carry') stack(x, y, crane.n, r);
+        g.strokeStyle = '#ffd030'; g.lineWidth = 4; g.lineCap = 'round';
+        const open = hold ? 0 : 8;
+        g.beginPath(); g.moveTo(x - 14, hy - 8); g.lineTo(x - r - 8 - open, hy + 4); g.lineTo(x - r - 6 - open, hy + 20); g.stroke();
+        g.beginPath(); g.moveTo(x + 14, hy - 8); g.lineTo(x + r + 8 + open, hy + 4); g.lineTo(x + r + 6 + open, hy + 20); g.stroke();
+        g.lineCap = 'butt';
+        if (crane.phase === 'carry' && crane.t > 1600) { g.strokeStyle = '#ffd75e'; g.lineWidth = 2; g.setLineDash([6, 5]); g.beginPath(); g.ellipse(fx, fy, r * 2.4, r * 0.8, 0, 0, 7); g.stroke(); g.setLineDash([]); }
     }
     function drawBoss() {
         if (boss.phase === 'idle') return;
         const B = s.shared.boss;
-        // 右の 半分を おおう
-        g.fillStyle = 'rgba(30,0,10,0.72)'; g.fillRect(500, 0, 500, C.H);
+        // 上の 半分を おおう (液晶の まわり)
+        g.fillStyle = 'rgba(30,0,10,0.78)'; g.fillRect(0, 0, C.W, 250);
+        const BX = 500;
         if (boss.phase === 'select') {
             const list = C.boss.list, sp = Math.max(60, 400 - boss.t * 0.09);
             const idx = boss.t > 3400 && B ? list.findIndex(x => x.id === B.id) : Math.floor(boss.t / sp) % list.length;
             const b = list[idx];
-            g.fillStyle = '#ff8a8a'; g.font = '26px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText('ビックボスチャレンジ', 750, 60);
-            g.fillStyle = '#fff'; g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillText('強敵 ルーレット', 750, 90);
-            drawBossArt(b.id, 750, 400, 230);
-            g.fillStyle = '#ffd75e'; g.font = '22px "DotGothic16", monospace'; g.fillText(b.name, 750, 450);
-            g.fillStyle = '#fff'; g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillText(`報酬 (全席) ${b.reward} 枚・HP ${b.hp}`, 750, 476);
+            g.fillStyle = '#ff8a8a'; g.font = '26px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText('ビックボスチャレンジ', BX, 34);
+            g.fillStyle = '#fff'; g.font = '13px "M PLUS Rounded 1c", sans-serif'; g.fillText('強敵 ルーレット', BX, 54);
+            drawBossArt(b.id, BX, 252, 180);
+            g.fillStyle = '#ffd75e'; g.font = '22px "DotGothic16", monospace'; g.textAlign = 'left'; g.fillText(b.name, 640, 140);
+            g.fillStyle = '#fff'; g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillText(`報酬 (全席) ${b.reward} 枚`, 640, 166); g.fillText(`HP ${b.hp}`, 640, 186);
             return;
         }
         if (!B && boss.phase === 'fight') return;
         const id = B ? B.id : boss.res.id, def = C.boss.list.find(x => x.id === id);
         const hp = B ? B.hp : 0, max = B ? B.max : def.hp;
         const hurt = boss.hits.length && boss.hits[boss.hits.length - 1].t < 120;
-        if (!(boss.phase === 'result' && boss.res.win && boss.t > 600)) drawBossArt(id, 750 + (hurt ? (Math.random() - 0.5) * 8 : 0), 380, 250);
-        g.fillStyle = '#fff'; g.font = '20px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText(def.name, 750, 40);
+        if (!(boss.phase === 'result' && boss.res.win && boss.t > 600)) drawBossArt(id, BX + (hurt ? (Math.random() - 0.5) * 8 : 0), 256, 190);
+        g.fillStyle = '#fff'; g.font = '18px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText(def.name, BX, 26);
         // HP と 時間
-        g.fillStyle = '#300'; rr(560, 54, 380, 18, 9); g.fill();
-        g.fillStyle = '#ff4050'; rr(560, 54, 380 * Math.max(0, hp) / max, 18, 9); g.fill();
-        g.fillStyle = '#fff'; g.font = '12px "DotGothic16", monospace'; g.fillText(`HP ${Math.ceil(hp)} / ${max}`, 750, 68);
-        if (B) { g.fillStyle = B.left < 10 ? '#ff6060' : '#ffd75e'; g.font = '28px "DotGothic16", monospace'; g.fillText(`${Math.ceil(B.left)}`, 950, 110); g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.fillText('のこり 秒', 950, 126); }
+        g.fillStyle = '#300'; rr(310, 36, 380, 18, 9); g.fill();
+        g.fillStyle = '#ff4050'; rr(310, 36, 380 * Math.max(0, hp) / max, 18, 9); g.fill();
+        g.fillStyle = '#fff'; g.font = '12px "DotGothic16", monospace'; g.fillText(`HP ${Math.ceil(hp)} / ${max}`, BX, 50);
+        if (B) { g.fillStyle = B.left < 10 ? '#ff6060' : '#ffd75e'; g.font = '34px "DotGothic16", monospace'; g.fillText(`${Math.ceil(B.left)}`, 760, 52); g.font = '11px "M PLUS Rounded 1c", sans-serif'; g.fillText('のこり 秒', 760, 68); }
         // 仲間 (CPU) と 自分
         const allies = [['koori', 'あなた'], ['dake', 'CPU'], ['yamamou', 'CPU'], ['ikekimu', 'CPU']];
-        allies.forEach(([a, nm], i) => { const x = 580 + i * 56, y = 600; Art.draw(g, a, x, y - 10 + (boss.phase === 'fight' && Math.floor(t / 200 + i) % 3 === 0 ? -4 : 0), { height: 36, frame: Math.floor(t / 200 + i) }); g.fillStyle = i ? '#9fb8d8' : '#ffd75e'; g.font = '10px "M PLUS Rounded 1c", sans-serif'; g.fillText(nm, x, y + 2); });
-        if (B) { const tot = B.dmg[0] + B.cpu; g.fillStyle = '#fff'; g.font = '12px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText(`あなたの ダメージ ${Math.round(B.dmg[0])} (${tot ? Math.round(B.dmg[0] / tot * 100) : 0}%)`, 820, 586); g.fillText('メダルを 入れる・チャッカー入賞で 攻撃！', 520, 100); }
+        allies.forEach(([a, nm], i) => { const x = 50 + i * 60, y = 244; Art.draw(g, a, x, y - 10 + (boss.phase === 'fight' && Math.floor(t / 200 + i) % 3 === 0 ? -4 : 0), { height: 40, frame: Math.floor(t / 200 + i) }); g.fillStyle = i ? '#9fb8d8' : '#ffd75e'; g.font = '10px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'center'; g.fillText(nm, x, y + 4); });
+        if (B) { const tot = B.dmg[0] + B.cpu; g.fillStyle = '#fff'; g.font = '13px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left'; g.fillText(`あなたの ダメージ ${Math.round(B.dmg[0])} (${tot ? Math.round(B.dmg[0] / tot * 100) : 0}%)`, 640, 210); g.fillText('メダルを 入れる・チャッカー入賞で 攻撃！', 640, 234); }
         for (const h of boss.hits) { h.t += 16; g.globalAlpha = Math.max(0, 1 - h.t / 600); g.fillStyle = '#ffd75e'; g.font = 'bold 16px "DotGothic16", monospace'; g.textAlign = 'center'; g.fillText(`-${h.n}`, h.x, h.y - h.t * 0.05); g.globalAlpha = 1; }
         boss.hits = boss.hits.filter(h => h.t < 600);
         if (boss.phase === 'result') {
             g.fillStyle = boss.res.win ? '#ffd75e' : '#9fb8d8'; g.font = '34px "DotGothic16", monospace'; g.textAlign = 'center';
-            g.fillText(boss.res.win ? '撃破！！' : 'タイムアップ…', 750, 250);
-            g.font = '18px "M PLUS Rounded 1c", sans-serif'; g.fillText(`+${boss.res.rewards[0]} 枚 ${boss.res.mvp === 0 ? '・MVP ボール' : ''}`, 750, 284);
+            g.fillText(boss.res.win ? '撃破！！' : 'タイムアップ…', BX, 130);
+            g.font = '18px "M PLUS Rounded 1c", sans-serif'; g.fillText(`+${boss.res.rewards[0]} 枚 ${boss.res.mvp === 0 ? '・MVP ボール' : ''}`, BX, 162);
+            if (boss.res.win) { g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.fillText('ビックボスメダルタワーが クレーンで 台へ！', BX, 188); }
         }
     }
     function drawBossArt(id, x, y, h) {
@@ -513,13 +795,15 @@
         if (!talk) return;
         talk.t += dt;
         if (talk.t > 3200) { talk = null; return; }
-        const x = 520, y = boss.phase !== 'idle' ? 128 : 10, w = 460, h = 58;
+        const ev = view.name !== 'field' && view.k > 0.5;
+        const x = 10, y = ev ? 470 : boss.phase !== 'idle' ? 262 : 56, w = 270, h = 70;
         g.globalAlpha = Math.min(1, (3200 - talk.t) / 300);
         g.fillStyle = 'rgba(8,20,40,0.88)'; rr(x, y, w, h, 12); g.fill();
         g.strokeStyle = talk.color || '#fff'; g.lineWidth = 2; g.stroke();
         Art.draw(g, talk.who, x + 32, y + h - 4, { height: 48 });
-        g.fillStyle = '#fff'; g.font = '15px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left';
-        g.fillText(talk.msg, x + 64, y + 34);
+        g.fillStyle = '#fff'; g.font = '14px "M PLUS Rounded 1c", sans-serif'; g.textAlign = 'left';
+        const L = 13, lines = []; for (let i = 0; i < talk.msg.length; i += L) lines.push(talk.msg.slice(i, i + L));
+        lines.slice(0, 3).forEach((ln, i) => g.fillText(ln, x + 64, y + 22 + i * 19 - (lines.length > 2 ? 6 : 0)));
         g.globalAlpha = 1;
     }
     function drawJP() {
@@ -555,6 +839,9 @@
     document.addEventListener('click', e => { if (!e.target.closest('#snd-panel') && e.target.id !== 'snd-btn') $('snd-panel').hidden = true; });
 
     start();
-    // 画面確認用: ?fresh=1&medals=500&ball=1&boss=1
+    // 画面確認用: ?fresh=1&medals=500&ball=1&boss=1&crane=40&sr=1&jpr=1
     if (params.get('auto')) { holding = true; aimX = F.x + Number(params.get('auto')); }
+    if (params.get('jpr')) rouletteStart();   // 画面の 確認用: JP ルーレット
+    if (params.get('crane')) craneStart(Number(params.get('crane')) || 40, 0);   // 画面の 確認用
+    if (params.get('sr')) { const r = Game.specialRoulette(s); if (r.medals) pending += r.medals; sr.queue.push(r); }
 })();

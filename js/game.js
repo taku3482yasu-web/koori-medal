@@ -90,8 +90,9 @@
     // 回した 結果を 反映する。画面は アニメの あとに よぶ。かえり値 = 起きた こと
     function applySpin(s, sp, i = 0) {
         const me = seat(s, i);
-        const out = { spill: 0, ball: 0, bossStart: null };
-        if (sp.result === 'ball' || (sp.result === 'battle' && sp.battleWin)) { me.balls++; out.ball = 1; }
+        const out = { spill: 0, ball: 0, bossStart: null, fball: null };
+        if (sp.result === 'fball') out.fball = rand(s) < C.fieldBall.sballShare ? 'sball' : 'cball';
+        else if (sp.result === 'ball' || (sp.result === 'battle' && sp.battleWin)) { me.balls++; out.ball = 1; }
         else if (sp.medals) { out.spill = sp.medals; me.won.slot += sp.medals; }
         else if (sp.result === 'boss' && !s.shared.boss) out.bossStart = startBoss(s, 'slot');
         return out;
@@ -131,6 +132,30 @@
         if (v === 'again') return { idx, kind: 'again', medals: 0 };
         me.paid += v; me.medals += v; me.won.roulette += v;
         return { idx, kind: 'medals', medals: v };
+    }
+
+
+    // ----- 台の ボール: 手前から 落ちた とき -----
+    // cball → 枚数 (直接 払い出し)・sball → スペシャルルーレット
+    function fieldBall(s, kind, i = 0) {
+        const me = seat(s, i);
+        s.stats.fballs = (s.stats.fballs || 0) + 1;
+        if (kind === 'cball') { const n = C.fieldBall.medals; me.paid += n; me.medals += n; me.won.fball = (me.won.fball || 0) + n; return { kind: 'medals', medals: n }; }
+        return specialRoulette(s, i);
+    }
+    // スペシャルルーレット。結果: medals / ball (氷の 塔の ボール) / boss (ゲージ) / jpc (JP ルーレットへ)
+    function specialRoulette(s, i = 0) {
+        const me = seat(s, i);
+        const P = C.specialRoulette.pockets, idx = Math.floor(rand(s) * P.length), v = P[idx];
+        s.stats.sroulette = (s.stats.sroulette || 0) + 1;
+        if (typeof v === 'number') { me.paid += v; me.medals += v; me.won.fball = (me.won.fball || 0) + v; return { special: true, idx, kind: 'medals', medals: v }; }
+        if (v === 'ball') { me.balls++; return { special: true, idx, kind: 'ball', medals: 0 }; }
+        if (v === 'boss') {
+            let bossStart = null;
+            if (!s.shared.boss) { s.shared.gauge += Math.round(C.boss.gauge.full * C.specialRoulette.gauge); if (s.shared.gauge >= C.boss.gauge.full) bossStart = startBoss(s, 'gauge'); }
+            return { special: true, idx, kind: 'boss', medals: 0, bossStart };
+        }
+        return { special: true, idx, kind: 'jpc', medals: 0 };
     }
 
     // ----- ビックボスチャレンジ -----
@@ -184,7 +209,7 @@
     // 払い出し (プッシャーの 手前から 落ちた ぶん)
     function payout(s, n, i = 0) { const me = seat(s, i); me.medals += n; me.paid += n; }
 
-    const Game = { C, rand, entry, newState, newSeat, seat, insert, chakker, spin, applySpin, tower, roulette, startBoss, bossGo, bossTick, bossHit, endBoss, payout };
+    const Game = { C, rand, entry, newState, newSeat, seat, insert, chakker, spin, applySpin, tower, roulette, fieldBall, specialRoulette, startBoss, bossGo, bossTick, bossHit, endBoss, payout };
     if (typeof module !== 'undefined') module.exports = Game;
     else root.Game = Game;
 })(this);

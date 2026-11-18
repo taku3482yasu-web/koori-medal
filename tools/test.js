@@ -91,27 +91,42 @@ function check(name, cond, info = '') { if (cond) ok++; else { ng++; console.log
     const x = Game.newState(11); Game.startBoss(x, 't'); Game.bossGo(x); Game.insert(x);
     check('ボス中は ゲージが たまらない', x.shared.gauge === 0);
 }
-// 物理: メダルが 手前から 落ちる・数が こわれない
+// 物理 (js/coin25d.js): メダルが 積もる・手前から 落ちる・数が こわれない・台の ボール
 {
-    const Pusher = require('../js/pusher.js');
-    const p = Pusher.create();
+    const Coin25D = require('../js/coin25d.js');
+    const p = Coin25D.create({ side: C.field.side, seed: 3, R: C.field.medalR, T: C.field.medalT, RB: C.field.ballR });
     p.fill(C.field.startUpper, C.field.startLower);
     const n0 = p.count();
-    let pay = 0, side = 0, nan = false;
-    for (let f = 0; f < 3000; f++) {
-        if (f % 30 === 0) p.insert(C.field.x + 60 + Math.random() * 300);
+    p.addBall('cball', 100); p.addBall('sball', 300);
+    let pay = 0, side = 0, nan = false, stacked = 0; const sp = [];
+    for (let f = 0; f < 4000; f++) {
+        if (f % 16 === 0) p.insert(60 + Math.random() * 300);
         p.step();
-        const e = p.take(); pay += e.pay; side += e.side;
-        if (f % 500 === 0) for (const b of p.medals) if (!Number.isFinite(b.position.x)) nan = true;
+        const e = p.take(); pay += e.pay; side += e.side; sp.push(...e.special);
+        if (f % 500 === 0) { for (const c of p.coins) if (!Number.isFinite(c.x + c.y + c.z)) nan = true; stacked = Math.max(stacked, p.coins.filter(c => c.on === 2).length); }
     }
-    check('プッシャーで メダルが 手前から 落ちる', pay > 20, pay);
+    check('プッシャーで メダルが 手前から 落ちる', pay > 40, pay);
     check('左右の 穴にも 落ちる (店の もの)', side > 0, side);
+    check('メダルが メダルの 上に 積もる', stacked > 50, stacked);
     check('メダルの 位置が こわれない', !nan);
-    check('メダルは フィールドの 中', [...p.medals].every(b => b.position.x > C.field.x - 30 && b.position.x < C.field.x + C.field.w + 30));
-    const q = Pusher.create(); q.restore(p.snapshot());
-    check('フィールドを 保存して もどせる', q.count() === p.count() && n0 > 0);
+    check('メダルは 台の はばの 中', p.coins.every(c => c.x >= 0 && c.x <= p.P.FW));
+    check('台の ボールも うごいて いる', p.balls().length + sp.length === 2 && (sp.length > 0 || p.balls().some(b => b.y > 200)), JSON.stringify(p.balls().map(b => Math.round(b.y))));
+    const q = Coin25D.create(); q.restore(p.snapshot());
+    check('台を 保存して もどせる', q.coins.length === p.coins.length && n0 > 0);
     const c0 = p.count(); p.spill(20, 0);
     check('放出で メダルが ふえる', p.count() === c0 + 20);
+    const r = Coin25D.create({ seed: 4, R: C.field.medalR, T: C.field.medalT, RB: C.field.ballR }); r.fill(40, 120); r.tower(210, 300, 30); for (let i = 0; i < 60; i++) r.step();
+    check('タワー (積んだ メダル) が 立つ', Math.max(...r.coins.map(c => c.z)) > 60);
+    r.explode(210, 300, 64, 320); for (let i = 0; i < 120; i++) r.step();
+    check('爆散で タワーが くずれる', Math.max(...r.coins.filter(c => c.y > 160).map(c => c.z)) < 30);
+}
+// 台の ボールと スペシャルルーレット
+{
+    const s = Game.newState(21); const m0 = s.seats[0].medals;
+    const r = Game.fieldBall(s, 'cball');
+    check('こおりボールを 落とすと 枚数', r.medals === C.fieldBall.medals && s.seats[0].medals === m0 + r.medals);
+    const kinds = new Set(); for (let i = 0; i < 400; i++) kinds.add(Game.fieldBall(s, 'sball').kind);
+    check('スペシャルルーレットで 枚数・ボール・ボス・JP ルーレット', ['medals', 'ball', 'boss', 'jpc'].every(k => kinds.has(k)), [...kinds].join(','));
 }
 // 払い出しの 割合 (2026-11-17 ユーザー決定: 甘め 95% くらい)。物理の ρ は tools/rtp.js phys で 測った 値 (RHO)
 {

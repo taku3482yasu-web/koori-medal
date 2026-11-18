@@ -1,19 +1,19 @@
 // 払い出しの 割合 (RTP) を しらべる (node tools/rtp.js [phys])
-// 1) phys: プッシャーの 物理だけ 回して、フィールドに 入った メダルの うち 手前から 落ちる 割合 (ρ) を 測る
+// 1) phys: プッシャーの 物理 (js/coin25d.js) だけ 回して、フィールドに 入った メダルの うち 手前から 落ちる 割合 (ρ) を 測る
 // 2) ゲームの きまりを 時間つきで 回す (スロットの 回る 時間・保留 4 個・塔・ルーレット・ボス 60 秒)。
 //    フィールドに 出た メダル (入れた ぶん + スロット・ボス・JP の 放出) は ρ の 割合で もどる と して 計算する
 // RTP = (ρ × (入れた + 放出) + 直接の 払い出し (塔・ルーレット・JP)) ÷ 入れた
 const Game = require('../js/game.js');
 const C = Game.C;
 
-function measurePhys(frames = 26000, warm = 6000) {
-    const Pusher = require('../js/pusher.js');
-    const p = Pusher.create();
+function measurePhys(frames = 14000, warm = 5000) {
+    const Coin25D = require('../js/coin25d.js');
+    const p = Coin25D.create({ side: Number(process.env.SIDE || C.field.side), seed: 9, R: C.field.medalR, T: C.field.medalT, RB: C.field.ballR });
     p.fill(C.field.startUpper, C.field.startLower);
     let ins = 0, pay = 0, side = 0;
     const every = Math.round(60 * C.autoMs / 1000 * 2);
     for (let f = 0; f < frames + warm; f++) {
-        if (f % every === 0) { p.insert(C.field.x + 30 + Math.random() * (C.field.w - 60)); if (f >= warm) ins++; }
+        if (f % every === 0) { p.insert(30 + Math.random() * (C.field.w - 60)); if (f >= warm) ins++; }
         p.step();
         const e = p.take();
         if (f >= warm) { pay += e.pay; side += e.side; }
@@ -44,6 +44,12 @@ function simulate({ inserts = 2e6, seed = 1, aim = null, rho = 0.84 } = {}) {
             const r = Game.applySpin(s, sp);
             spill += r.spill;
             if (r.bossStart) { Game.bossGo(s); bossActive = true; }
+            // 台の ボール: いずれ 手前から 落ちる (左右の 穴に 落ちても 台に もどる) と して すぐ 計算
+            if (r.fball) {
+                const fb = Game.fieldBall(s, r.fball);
+                if (fb.kind === 'jpc') { let rr; do { rr = Game.roulette(s); } while (rr.kind === 'again'); if (rr.kind === 'jp') spill += rr.spill; }
+                if (fb.bossStart) { Game.bossGo(s); bossActive = true; }
+            }
         }
         // 塔と ルーレット (ボールが あれば 順に)
         if (t >= towerBusy && me.balls > 0) {
@@ -62,11 +68,11 @@ function simulate({ inserts = 2e6, seed = 1, aim = null, rho = 0.84 } = {}) {
             if (res) { bossActive = false; spill += res.rewards[0]; }
         }
     }
-    const direct = me.won.tower + me.won.roulette + (me.won.jp - 0) - Math.round(me.won.jp * C.jp.spill);
+    const direct = me.won.tower + me.won.roulette + (me.won.fball || 0) + (me.won.jp - 0) - Math.round(me.won.jp * C.jp.spill);
     const rtp = (rho * (me.inserted + spill) + direct) / me.inserted;
     return {
         rtp, rho, inserted: me.inserted, spill, direct,
-        parts: { phys: rho, slot: rho * me.won.slot / me.inserted, tower: me.won.tower / me.inserted, roulette: me.won.roulette / me.inserted, jp: me.won.jp / me.inserted, boss: rho * me.won.boss / me.inserted },
+        parts: { phys: rho, slot: rho * me.won.slot / me.inserted, tower: me.won.tower / me.inserted, roulette: me.won.roulette / me.inserted, fball: (me.won.fball || 0) / me.inserted, jp: me.won.jp / me.inserted, boss: rho * me.won.boss / me.inserted },
         stats: { ...s.stats, hours: (t / 3600).toFixed(1), perHour: { jp: (s.stats.jps / (t / 3600)).toFixed(2), boss: (s.stats.bosses / (t / 3600)).toFixed(2), ball: ((me.won.tower ? 1 : 0)) } },
         bossWinRate: s.stats.bosses ? (s.stats.bossWin / s.stats.bosses).toFixed(2) : '-'
     };
@@ -79,6 +85,6 @@ if (require.main === module) {
     for (const [name, aim] of [['でたらめ', null], ['中央を ねらう', C.chakkers[1].x], ['はしを ねらう', 20]]) {
         const r = simulate({ inserts: Number(process.env.N || 1e6), aim, rho });
         const pc = v => (v * 100).toFixed(1) + '%';
-        console.log(`${name.padEnd(8)} RTP ${pc(r.rtp)}  (物理 ${pc(r.parts.phys)} スロット ${pc(r.parts.slot)} 塔 ${pc(r.parts.tower)} ルーレット ${pc(r.parts.roulette)} JP ${pc(r.parts.jp)} ボス ${pc(r.parts.boss)})  ${r.stats.hours} 時間・JP ${r.stats.jps} 回 (${r.stats.perHour.jp}/時)・ボス ${r.stats.bosses} 回 (${r.stats.perHour.boss}/時・勝ち ${r.bossWinRate})・塔の てっぺん ${r.stats.towerTop}`);
+        console.log(`${name.padEnd(8)} RTP ${pc(r.rtp)}  (物理 ${pc(r.parts.phys)} スロット ${pc(r.parts.slot)} 塔 ${pc(r.parts.tower)} ルーレット ${pc(r.parts.roulette)} ボール ${pc(r.parts.fball)} JP ${pc(r.parts.jp)} ボス ${pc(r.parts.boss)})  ${r.stats.hours} 時間・JP ${r.stats.jps} 回 (${r.stats.perHour.jp}/時)・ボス ${r.stats.bosses} 回 (${r.stats.perHour.boss}/時・勝ち ${r.bossWinRate})・塔の てっぺん ${r.stats.towerTop}`);
     }
 }

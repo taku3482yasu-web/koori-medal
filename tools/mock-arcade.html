@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>画面イメージ案: ゲーセンの 大型機ふう</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="../js/art-legacy.js"></script>
+<script src="../js/art-boss.js"></script>
+<script src="../js/art-new.js"></script>
+<script src="../js/pixel-hd.js"></script>
+<script src="../js/art.js"></script>
+<script>
+// 画面イメージ案 (見るだけ)。席に すわった 目線で 見た 大型メダルゲーム。
+// 物理は 今の 真上 2D の まま、描く ときだけ 台形 (遠近) に うつす つもりの 絵。
+const W = 1000, H = 620, DPR = 2;
+const cv = document.getElementById('c');
+cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+const g = cv.getContext('2d'); g.scale(DPR, DPR);
+const FONT = '"Noto Sans CJK JP", sans-serif';
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+function rr(x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+function txt(s, x, y, size, color, opt = {}) {
+    g.font = `${opt.bold ? 900 : 700} ${size}px ${FONT}`; g.textAlign = opt.align || 'center'; g.textBaseline = 'middle';
+    if (opt.stroke) { g.lineWidth = opt.sw || 4; g.strokeStyle = opt.stroke; g.lineJoin = 'round'; g.strokeText(s, x, y); }
+    if (opt.glow) { g.shadowColor = opt.glow; g.shadowBlur = opt.blur || 12; }
+    g.fillStyle = color; g.fillText(s, x, y); g.shadowBlur = 0;
+}
+function led(x, y, r, c, on) { g.fillStyle = on ? c : 'rgba(255,255,255,0.08)'; if (on) { g.shadowColor = c; g.shadowBlur = 8; } g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.shadowBlur = 0; }
+
+// ---------- 遠近 (プッシャー台) ----------
+const CX = 500, YB = 322, YF = 552, WF = 560;
+const sc = t => 0.58 + 0.42 * t;                       // 奥 → 手前の 大きさ
+const py = t => YB + (YF - YB) * (t * 1.35) / (1 + 0.35 * t);
+const px = (u, t) => CX + (u - 0.5) * WF * sc(t);
+function quad(u0, u1, t0, t1, lift = 0) { g.beginPath(); g.moveTo(px(u0, t0), py(t0) - lift); g.lineTo(px(u1, t0), py(t0) - lift); g.lineTo(px(u1, t1), py(t1) - lift); g.lineTo(px(u0, t1), py(t1) - lift); g.closePath(); }
+
+// メダル (遠近で つぶれた 円・ふち・刻印・厚み)
+function medal(x, y, r, squash, gold, tilt = 0) {
+    g.save(); g.translate(x, y); g.rotate(tilt);
+    const ry = r * squash, th = Math.max(1.5, r * 0.28 * (1 - squash) + 1.5);
+    const dark = gold ? '#8a5a10' : '#56606e', mid = gold ? '#e0a820' : '#aab4c2', hi = gold ? '#fff0a0' : '#ffffff';
+    // 厚み
+    g.fillStyle = dark; g.beginPath(); g.ellipse(0, th, r, ry, 0, 0, 7); g.fill(); g.fillRect(-r, 0, r * 2, th);
+    // 面
+    const gr = g.createLinearGradient(-r, -ry, r, ry); gr.addColorStop(0, hi); gr.addColorStop(0.45, mid); gr.addColorStop(1, dark);
+    g.fillStyle = gr; g.beginPath(); g.ellipse(0, 0, r, ry, 0, 0, 7); g.fill();
+    // ふちの 段
+    g.strokeStyle = gold ? 'rgba(120,70,0,0.7)' : 'rgba(60,70,85,0.7)'; g.lineWidth = Math.max(0.8, r * 0.1);
+    g.beginPath(); g.ellipse(0, 0, r * 0.74, ry * 0.74, 0, 0, 7); g.stroke();
+    // 刻印 (雪の 結晶)
+    if (r > 5) {
+        g.strokeStyle = gold ? 'rgba(255,250,210,0.85)' : 'rgba(255,255,255,0.8)'; g.lineWidth = Math.max(0.7, r * 0.08);
+        g.beginPath(); for (let k = 0; k < 3; k++) { const a = k * Math.PI / 3; g.moveTo(-Math.cos(a) * r * 0.48, -Math.sin(a) * ry * 0.48); g.lineTo(Math.cos(a) * r * 0.48, Math.sin(a) * ry * 0.48); } g.stroke();
+    }
+    // つや
+    g.strokeStyle = 'rgba(255,255,255,0.75)'; g.lineWidth = Math.max(0.8, r * 0.12);
+    g.beginPath(); g.ellipse(0, 0, r * 0.9, ry * 0.9, 0, Math.PI * 1.05, Math.PI * 1.55); g.stroke();
+    g.restore();
+}
+
+// ---------- 背景 (お店の 中) ----------
+function back() {
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#0b0620'); gr.addColorStop(1, '#020208');
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    // 天井の あかり
+    for (let i = 0; i < 6; i++) { const x = 80 + i * 170; const rg = g.createRadialGradient(x, -40, 4, x, -40, 160); rg.addColorStop(0, 'rgba(160,120,255,0.25)'); rg.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = rg; g.fillRect(x - 160, 0, 320, 200); }
+    // 筐体の 本体 (メッキの わく)
+    const body = g.createLinearGradient(0, 30, 0, H); body.addColorStop(0, '#16284a'); body.addColorStop(1, '#0a1428');
+    g.fillStyle = body; rr(20, 34, 960, 600, 26); g.fill();
+    g.strokeStyle = '#c8d8f0'; g.lineWidth = 3; rr(20, 34, 960, 600, 26); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.25)'; g.lineWidth = 1; rr(26, 40, 948, 590, 22); g.stroke();
+}
+
+// ---------- 上の 看板 ----------
+function marquee() {
+    const gr = g.createLinearGradient(0, 0, 0, 40); gr.addColorStop(0, '#2a1060'); gr.addColorStop(1, '#120630');
+    g.fillStyle = gr; rr(250, 2, 500, 44, 14); g.fill();
+    g.strokeStyle = '#ffd75e'; g.lineWidth = 2; rr(250, 2, 500, 44, 14); g.stroke();
+    for (let i = 0; i < 34; i++) led(262 + i * 14.6, 6, 2, ['#ff5ab0', '#ffd75e', '#6ae8ff'][i % 3], i % 2 === 0);
+    for (let i = 0; i < 34; i++) led(262 + i * 14.6, 42, 2, ['#6ae8ff', '#ff5ab0', '#ffd75e'][i % 3], i % 2 === 1);
+    txt('こおりくんの大冒険', 500, 20, 20, '#ffffff', { bold: 1, stroke: '#3a6ad0', sw: 5, glow: '#8fdcff' });
+    txt('～氷の城と大きな竜～', 500, 36, 10, '#bfe8ff');
+}
+
+// ---------- ビックボスメダルタワー (まんなか・モニターの 上) ----------
+function bigTower() {
+    const cx = 500, y0 = 52, y1 = 112, w = 70;
+    // ガラスの つつ
+    g.fillStyle = 'rgba(143,220,255,0.12)'; rr(cx - w / 2 - 8, y0 - 4, w + 16, y1 - y0 + 8, 18); g.fill();
+    // 金の メダルの 山 (つみかさね)
+    for (let k = 0; k < 10; k++) {
+        const y = y1 - 4 - k * 5.4, n = k < 4 ? 3 : k < 9 ? 2 : 1;
+        for (let i = 0; i < n; i++) medal(cx + (i - (n - 1) / 2) * 22 + (k % 2 ? 4 : -4), y, 11, 0.32, true);
+    }
+    g.strokeStyle = 'rgba(200,240,255,0.7)'; g.lineWidth = 2; rr(cx - w / 2 - 8, y0 - 4, w + 16, y1 - y0 + 8, 18); g.stroke();
+    g.strokeStyle = 'rgba(255,255,255,0.5)'; g.beginPath(); g.moveTo(cx - w / 2 + 2, y0 + 6); g.lineTo(cx - w / 2 + 2, y1 - 6); g.stroke();
+    // 台座と 名前
+    g.fillStyle = '#c02030'; rr(cx - 70, y1 + 4, 140, 16, 6); g.fill();
+    txt('ビックボスメダルタワー', cx, y1 + 12, 10, '#fff', { bold: 1 });
+}
+
+// ---------- 大きな モニター (通常時の キャラ画面) ----------
+function monitor() {
+    const x = 316, y = 148, w = 368, h = 132;
+    g.fillStyle = '#05070c'; rr(x - 10, y - 10, w + 20, h + 20, 14); g.fill();
+    g.strokeStyle = '#8aa0c0'; g.lineWidth = 2; rr(x - 10, y - 10, w + 20, h + 20, 14); g.stroke();
+    g.save(); rr(x, y, w, h, 6); g.clip();
+    const sky = g.createLinearGradient(0, y, 0, y + h); sky.addColorStop(0, '#1c4a9a'); sky.addColorStop(1, '#8fd0ff');
+    g.fillStyle = sky; g.fillRect(x, y, w, h);
+    // 氷の 城
+    g.fillStyle = 'rgba(230,250,255,0.85)';
+    for (const [bx, bw, bh] of [[x + 220, 30, 70], [x + 250, 40, 100], [x + 290, 30, 80], [x + 320, 36, 60]]) { g.fillRect(bx, y + h - bh, bw, bh); g.beginPath(); g.moveTo(bx - 3, y + h - bh); g.lineTo(bx + bw / 2, y + h - bh - 22); g.lineTo(bx + bw + 3, y + h - bh); g.fill(); }
+    g.fillStyle = '#e8f8ff'; g.fillRect(x, y + h - 18, w, 18);
+    // 雪
+    g.fillStyle = 'rgba(255,255,255,0.8)'; for (let i = 0; i < 30; i++) g.fillRect(x + rnd() * w, y + rnd() * h, 2, 2);
+    // リール (3 つ)
+    for (let i = 0; i < 3; i++) {
+        const rx = x + 18 + i * 66, ry = y + 12, rw = 60, rh = 64;
+        g.fillStyle = 'rgba(255,255,255,0.92)'; rr(rx, ry, rw, rh, 8); g.fill();
+        g.strokeStyle = '#3a6ad0'; g.lineWidth = 2; rr(rx, ry, rw, rh, 8); g.stroke();
+        if (i === 0) Art.draw(g, 'koori', rx + rw / 2, ry + rh - 10, { height: 44 });
+        if (i === 1) Art.draw(g, 'koori', rx + rw / 2, ry + rh - 10, { height: 44 });
+        if (i === 2) { g.fillStyle = 'rgba(58,106,208,0.25)'; g.fillRect(rx, ry, rw, rh); txt('?', rx + rw / 2, ry + rh / 2, 34, '#3a6ad0', { bold: 1 }); }
+    }
+    // リーチ
+    txt('リーチ！', x + 117, y + 94, 22, '#ffd75e', { bold: 1, stroke: '#c02030', sw: 5 });
+    // 保留
+    ['#3a7ae0', '#6ae8ff', '#ffd75e'].forEach((c, i) => led(x + 30 + i * 18, y + 118, 6, c, true));
+    txt('保留', x + 98, y + 118, 10, '#ffffff', { align: 'left' });
+    // キャラ
+    Art.draw(g, 'okagappa', x + 262, y + h - 14, { height: 70 });
+    Art.draw(g, 'koori', x + 318, y + h - 14, { height: 62 });
+    g.fillStyle = '#ffffff'; rr(x + 236, y + 10, 120, 30, 10); g.fill();
+    g.beginPath(); g.moveTo(x + 300, y + 40); g.lineTo(x + 310, y + 50); g.lineTo(x + 314, y + 40); g.fill();
+    txt('チャンス だよ！', x + 296, y + 25, 13, '#1a2a4a', { bold: 1 });
+    g.restore();
+}
+
+// ---------- 氷の 塔 (左) ----------
+function iceTower() {
+    const cx = 150, y0 = 70, y1 = 318;
+    // 光の 柱
+    const glow = g.createRadialGradient(cx, 200, 10, cx, 200, 150); glow.addColorStop(0, 'rgba(120,220,255,0.25)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = glow; g.fillRect(cx - 150, 50, 300, 300);
+    // 本体 (奥に すぼまる)
+    const gr = g.createLinearGradient(cx - 60, 0, cx + 60, 0); gr.addColorStop(0, '#5ab0e8'); gr.addColorStop(0.5, '#e8faff'); gr.addColorStop(1, '#3a88c8');
+    g.fillStyle = gr; g.beginPath(); g.moveTo(cx - 34, y0 + 26); g.lineTo(cx + 34, y0 + 26); g.lineTo(cx + 62, y1); g.lineTo(cx - 62, y1); g.closePath(); g.fill();
+    g.fillStyle = '#ffffff'; g.beginPath(); g.moveTo(cx - 42, y0 + 28); g.lineTo(cx, y0 - 8); g.lineTo(cx + 42, y0 + 28); g.closePath(); g.fill();
+    txt('JP', cx, y0 + 16, 13, '#ffd75e', { bold: 1, stroke: '#a07010', sw: 3 });
+    // 3 段の わ (ランプ)
+    [[1, 260, true], [2, 190, true], [3, 122, false]].forEach(([n, y, on]) => {
+        const hw = 34 + (y - y0 - 26) / (y1 - y0 - 26) * 28 + 6;
+        g.fillStyle = on ? '#ffd75e' : '#2a4a7a'; g.beginPath(); g.ellipse(cx, y, hw, 7, 0, 0, 7); g.fill();
+        for (let i = 0; i < 8; i++) led(cx - hw + 6 + i * (hw * 2 - 12) / 7, y, 2, '#ffffff', on && i % 2 === 0);
+        txt(`${n}段`, cx + hw + 16, y, 11, on ? '#ffd75e' : '#8aa0c0', { bold: 1 });
+    });
+    // ボールと キャラ
+    const bg = g.createRadialGradient(cx - 4, 176, 1, cx, 180, 10); bg.addColorStop(0, '#fff'); bg.addColorStop(1, '#2a8ae0');
+    g.fillStyle = bg; g.beginPath(); g.arc(cx, 180, 9, 0, 7); g.fill();
+    Art.draw(g, 'koori', cx - 26, 186, { height: 30 });
+    Art.draw(g, 'onioni', cx + 34, 168, { height: 34, flip: true });
+    txt('氷の塔', cx, 336, 13, '#bfe8ff', { bold: 1, stroke: '#0a1428', sw: 4 });
+}
+
+// ---------- JP ルーレット (右・ななめから 見た 円ばん) ----------
+function roulette() {
+    const cx = 850, cy = 230, rx = 112, ry = 46, th = 16;
+    const pockets = ['JP', 30, 50, 'もう1回', 30, 40, 100, 30, 50, 'もう1回', 30, 40, 60, 30, 50, 'もう1回', 30, 40, 80, 30, 50, 30, 40, 30];
+    // ドーム
+    g.fillStyle = 'rgba(143,220,255,0.08)'; g.beginPath(); g.ellipse(cx, cy - 30, rx + 14, 90, 0, Math.PI, 0); g.fill();
+    g.strokeStyle = 'rgba(200,240,255,0.5)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(cx, cy - 30, rx + 14, 90, 0, Math.PI, 0); g.stroke();
+    // 側面
+    g.fillStyle = '#7a8aa8'; g.beginPath(); g.ellipse(cx, cy + th, rx, ry, 0, 0, Math.PI); g.lineTo(cx - rx, cy); g.ellipse(cx, cy, rx, ry, 0, Math.PI, 0, true); g.closePath(); g.fill();
+    for (let i = 0; i < 16; i++) { const a = Math.PI * (i + 0.5) / 16; led(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry + th / 2, 2.2, i % 2 ? '#ffd75e' : '#ff5ab0', true); }
+    // ポケット
+    const off = -Math.PI / 2 - 0.4;
+    pockets.forEach((p, i) => {
+        const a0 = off + i * Math.PI * 2 / 24, a1 = a0 + Math.PI * 2 / 24;
+        g.fillStyle = p === 'JP' ? '#ffd75e' : String(p).includes('もう') ? '#5ad890' : i % 2 ? '#1a4a8a' : '#2a6ab8';
+        g.beginPath(); g.moveTo(cx, cy); for (let k = 0; k <= 6; k++) { const a = a0 + (a1 - a0) * k / 6; g.lineTo(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry); } g.closePath(); g.fill();
+        const am = (a0 + a1) / 2;
+        if (p === 'JP' || typeof p === 'number') txt(String(p), cx + Math.cos(am) * rx * 0.8, cy + Math.sin(am) * ry * 0.8, p === 'JP' ? 11 : 8, p === 'JP' ? '#7a3a00' : '#ffffff', { bold: 1 });
+    });
+    g.strokeStyle = '#d8e8ff'; g.lineWidth = 2; g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, 7); g.stroke();
+    // まんなか
+    g.fillStyle = '#e8f8ff'; g.beginPath(); g.ellipse(cx, cy - 4, 26, 12, 0, 0, 7); g.fill();
+    Art.draw(g, 'koori', cx, cy + 4, { height: 26 });
+    // ボール
+    const ba = off + 1.2 * Math.PI * 2 / 24, bx = cx + Math.cos(ba) * rx * 0.92, by = cy + Math.sin(ba) * ry * 0.92 - 6;
+    const bg = g.createRadialGradient(bx - 3, by - 3, 1, bx, by, 9); bg.addColorStop(0, '#fff'); bg.addColorStop(1, '#2a8ae0');
+    g.fillStyle = bg; g.beginPath(); g.arc(bx, by, 8, 0, 7); g.fill();
+    // JP の 数字
+    g.fillStyle = '#100a00'; rr(cx - 86, 82, 172, 44, 8); g.fill(); g.strokeStyle = '#ffd75e'; g.lineWidth = 2; rr(cx - 86, 82, 172, 44, 8); g.stroke();
+    txt('こおりJP', cx, 94, 11, '#ffd75e', { bold: 1 });
+    txt('1,284 枚', cx, 113, 20, '#ffd75e', { bold: 1, glow: '#ffb000' });
+    txt('JPルーレット', cx, 300, 13, '#bfe8ff', { bold: 1, stroke: '#0a1428', sw: 4 });
+}
+
+// ---------- プッシャー台 (遠近) ----------
+function field() {
+    // 奥の かべ (チャッカー)
+    const wy = py(0);
+    g.fillStyle = '#0e2448'; g.beginPath(); g.moveTo(px(0, 0) - 6, wy - 30); g.lineTo(px(1, 0) + 6, wy - 30); g.lineTo(px(1, 0), wy); g.lineTo(px(0, 0), wy); g.closePath(); g.fill();
+    [['L', 0.17, '#8fdcff'], ['CENTER', 0.5, '#ffd75e'], ['R', 0.83, '#8fdcff']].forEach(([n, u, c]) => {
+        const x = px(u, 0); g.fillStyle = '#02060e'; rr(x - 22, wy - 24, 44, 16, 6); g.fill(); g.strokeStyle = c; g.lineWidth = 2; rr(x - 22, wy - 24, 44, 16, 6); g.stroke();
+        txt(n, x, wy - 16, 8, c, { bold: 1 });
+    });
+    // 上段の 台と プッシャー
+    const up0 = 0.0, upP = 0.1, upE = 0.42, lift = 10;
+    g.fillStyle = '#2a6ab0'; quad(0, 1, up0, upE, lift); g.fill();
+    g.fillStyle = '#c8e8ff'; quad(0, 1, up0, upP, lift); g.fill();
+    g.fillStyle = '#7ab0e0'; g.beginPath(); g.moveTo(px(0, upP), py(upP) - lift); g.lineTo(px(1, upP), py(upP) - lift); g.lineTo(px(1, upP), py(upP) - lift + 5); g.lineTo(px(0, upP), py(upP) - lift + 5); g.fill();
+    // 上段の 前の だん (下段へ 落ちる)
+    g.fillStyle = '#123a70'; g.beginPath(); g.moveTo(px(0, upE), py(upE) - lift); g.lineTo(px(1, upE), py(upE) - lift); g.lineTo(px(1, upE), py(upE) + 4); g.lineTo(px(0, upE), py(upE) + 4); g.fill();
+    // 下段 (うごく テーブル = 上段の 下から 出る)
+    const loP = 0.5, loE = 1;
+    g.fillStyle = '#1e5aa0'; quad(0, 1, upE, loE); g.fill();
+    g.fillStyle = '#b0d8f8'; quad(0, 1, upE, loP); g.fill();
+    g.fillStyle = '#6aa0d8'; g.beginPath(); g.moveTo(px(0, loP), py(loP)); g.lineTo(px(1, loP), py(loP)); g.lineTo(px(1, loP), py(loP) + 6); g.lineTo(px(0, loP), py(loP) + 6); g.fill();
+    // 店の 穴 (下段 手前の 左右)
+    g.fillStyle = '#01030a'; quad(0, 0.1, 0.93, 1); g.fill(); quad(0.9, 1, 0.93, 1); g.fill();
+    // メダル
+    const list = [];
+    const put = (t0, t1, n, lft, golds) => { for (let i = 0; i < n; i++) { const t = t0 + rnd() * (t1 - t0), u = 0.04 + rnd() * 0.92; list.push({ u, t, lft, gold: rnd() < golds, layer: 0 }); } };
+    put(0.12, 0.41, 90, lift, 0.04);
+    put(0.52, 0.99, 210, 0, 0.06);
+    // 2 段 目 (山)
+    for (let i = 0; i < 70; i++) { const t = 0.62 + rnd() * 0.3, u = 0.2 + rnd() * 0.6; list.push({ u, t, lft: 0, gold: rnd() < 0.05, layer: 1 }); }
+    list.sort((a, b) => a.t - b.t || a.layer - b.layer);
+    for (const m of list) { const r = 11 * sc(m.t); medal(px(m.u, m.t), py(m.t) - m.lft - m.layer * r * 0.5, r, 0.38 + 0.18 * m.t, m.gold); }
+    // ふちから こぼれる メダル (かたむいて 落ちる)
+    [[0.32, -0.6], [0.47, 0.5], [0.61, -0.3], [0.7, 0.8]].forEach(([u, a]) => medal(px(u, 1), py(1) + 4, 11, 0.75, false, a));
+    [[0.4, 22, 0.2], [0.55, 30, -1.1], [0.66, 18, 1.4]].forEach(([u, d, a]) => {
+        const x = px(u, 1), y = py(1) + d;
+        g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x - 4, y - 14); g.lineTo(x - 4, y - 6); g.moveTo(x + 4, y - 16); g.lineTo(x + 4, y - 8); g.stroke();
+        medal(x, y, 10, 0.9, false, a);
+    });
+    // まわりの メッキの わくと LED
+    g.strokeStyle = '#d8e4f4'; g.lineWidth = 5; g.beginPath(); g.moveTo(px(0, 0) - 8, py(0) - 32); g.lineTo(px(0, 1) - 10, py(1)); g.moveTo(px(1, 0) + 8, py(0) - 32); g.lineTo(px(1, 1) + 10, py(1)); g.stroke();
+    for (let i = 0; i <= 16; i++) { const t = i / 16; led(px(0, t) - 18, py(t) - 4, 2.6, ['#ff5ab0', '#ffd75e', '#6ae8ff'][i % 3], i % 2 === 0); led(px(1, t) + 18, py(t) - 4, 2.6, ['#6ae8ff', '#ffd75e', '#ff5ab0'][i % 3], i % 2 === 0); }
+    // 前の ガラスの 反射
+    g.fillStyle = 'rgba(255,255,255,0.05)'; g.beginPath(); g.moveTo(px(0.1, 0), py(0)); g.lineTo(px(0.3, 0), py(0)); g.lineTo(px(0.12, 1), py(1)); g.lineTo(px(-0.05, 1), py(1)); g.fill();
+}
+
+// ---------- 払い出しの うけざら (手前) ----------
+function tray() {
+    const x = 330, y = 572, w = 340, h = 40;
+    const gr = g.createLinearGradient(0, y, 0, y + h); gr.addColorStop(0, '#e8eef8'); gr.addColorStop(1, '#6a7a94');
+    g.fillStyle = gr; rr(x, y, w, h, 14); g.fill();
+    g.fillStyle = '#1a2230'; rr(x + 8, y + 6, w - 16, h - 14, 10); g.fill();
+    for (let i = 0; i < 46; i++) medal(x + 30 + rnd() * (w - 60), y + 14 + rnd() * 12, 9, 0.5, rnd() < 0.08);
+    txt('はらいだし', x + w / 2, y - 6, 10, '#ffd75e', { bold: 1, stroke: '#0a1428', sw: 3 });
+    // クレジット 表示
+    g.fillStyle = '#000'; rr(720, 576, 150, 32, 6); g.fill(); g.strokeStyle = '#6ae8ff'; g.lineWidth = 1.5; rr(720, 576, 150, 32, 6); g.stroke();
+    txt('メダル', 745, 592, 10, '#6ae8ff', { bold: 1 }); txt('499', 830, 592, 18, '#6ae8ff', { bold: 1, glow: '#3ab0ff' });
+    // 投入口
+    g.fillStyle = '#c8d4e8'; rr(140, 576, 120, 32, 8); g.fill(); g.fillStyle = '#202838'; rr(160, 588, 80, 8, 4); g.fill();
+    txt('メダル とうにゅう', 200, 571, 9, '#bfe8ff', { bold: 1 });
+}
+
+// ---------- となりの 席 (将来の 複数人) ----------
+function seats() {
+    for (const [side, label] of [[-1, 'SEAT 2'], [1, 'SEAT 3']]) {
+        g.save(); g.globalAlpha = 0.45;
+        const x0 = side < 0 ? 30 : 970;
+        g.fillStyle = '#123a70'; g.beginPath();
+        g.moveTo(x0, 360); g.lineTo(x0 + side * -150, 380); g.lineTo(x0 + side * -110, 548); g.lineTo(x0, 548); g.closePath(); g.fill();
+        for (let i = 0; i < 26; i++) medal(x0 - side * (20 + rnd() * 100), 420 + rnd() * 120, 8, 0.5, false);
+        g.restore();
+        g.fillStyle = 'rgba(0,0,0,0.6)'; rr(side < 0 ? 40 : 860, 440, 100, 40, 8); g.fill();
+        txt(label, side < 0 ? 90 : 910, 452, 11, '#8fdcff', { bold: 1 });
+        txt('あき席', side < 0 ? 90 : 910, 469, 13, '#ffffff', { bold: 1 });
+    }
+}
+
+back(); marquee(); iceTower(); roulette(); bigTower(); monitor(); seats(); field(); tray();
+document.title = 'ready';
+</script>
+</body>
+</html>
