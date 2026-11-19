@@ -75,16 +75,20 @@
             return { z: 0, vy: 0 };
         }
 
-        // ご近所 さがし (マス目)
-        const cell = P.RB * 2, grid = new Map();
-        const key = (i, j) => i * 4096 + j;
+        // ご近所 さがし (マス目)。Map を やめて 配列に した (スマホで おそかった 2026-11-19)
+        const cell = P.RB * 2, NX = Math.ceil(P.FW / cell) + 3, NY = Math.ceil((P.LE + 400) / cell) + 3;
+        const grid = Array.from({ length: NX * NY }, () => []), used = [];
+        const gi = x => Math.max(0, Math.min(NX - 1, Math.floor(x / cell) + 1));
+        const gj = y => Math.max(0, Math.min(NY - 1, Math.floor((y + 200) / cell) + 1));
         function buildGrid() {
-            grid.clear();
-            for (const c of coins) { const k = key(Math.floor(c.x / cell), Math.floor((c.y + 100) / cell)); let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(c); }
+            for (const a of used) a.length = 0;
+            used.length = 0;
+            for (const c of coins) { const a = grid[gj(c.y) * NX + gi(c.x)]; if (!a.length) used.push(a); a.push(c); }
         }
         function near(c, fn) {
-            const ci = Math.floor(c.x / cell), cj = Math.floor((c.y + 100) / cell);
-            for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) { const a = grid.get(key(i, j)); if (a) for (const o of a) if (o !== c) fn(o); }
+            const ci = gi(c.x), cj = gj(c.y);
+            const i0 = Math.max(0, ci - 1), i1 = Math.min(NX - 1, ci + 1), j0 = Math.max(0, cj - 1), j1 = Math.min(NY - 1, cj + 1);
+            for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const a = grid[j * NX + i]; for (let n = 0; n < a.length; n++) { const o = a[n]; if (o !== c) fn(o); } }
         }
 
         function substep(dt) {

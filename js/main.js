@@ -37,9 +37,10 @@
         if (v) { s = v.s; s.shared.boss = null; P.restore(v.field); for (let i = 0; i < 40; i++) P.step(); P.take(); }
         else {
             s = Game.newState(params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 2 ** 31));
-            P.fill(F.startUpper, F.startLower);
+            // はじめの 山は 先に 作った もの (js/start-field.js)。スマホで fill を その場で 計算すると 10 秒 ちかく 画面が 出なかった (2026-11-19)
+            if (typeof START_FIELD !== 'undefined') P.restore(START_FIELD); else P.fill(F.startUpper, F.startLower);
             for (let i = 0; i < C.fieldBall.start; i++) P.addBall(i < C.fieldBall.startSpecial ? 'sball' : 'cball', 60 + i * 100);
-            for (let i = 0; i < 90; i++) P.step(); P.take();
+            for (let i = 0; i < 40; i++) P.step(); P.take();
         }
         if (params.get('medals')) s.seats[0].medals = Number(params.get('medals'));
         if (params.get('boss')) { s.shared.gauge = C.boss.gauge.full - 1; }
@@ -519,10 +520,13 @@
         } else text('保留 MAX', x, y + 46, '#ff9a9a', 15);
     }
 
+    // 数字は かわった ときだけ 書きかえる (毎コマ 書くと スマホで おそい)
+    const hudLast = {};
+    const setHud = (id, v, fn) => { if (hudLast[id] !== v) { hudLast[id] = v; fn($(id), v); } };
     function hud() {
-        $('medals').textContent = Math.max(0, me().medals - pending).toLocaleString();
-        $('jp').textContent = Math.floor(s.shared.jp).toLocaleString();
-        $('gauge').style.width = `${s.shared.boss ? 100 : Math.min(100, s.shared.gauge / C.boss.gauge.full * 100)}%`;
+        setHud('medals', Math.max(0, me().medals - pending), (el, v) => { el.textContent = v.toLocaleString(); });
+        setHud('jp', Math.floor(s.shared.jp), (el, v) => { el.textContent = v.toLocaleString(); });
+        setHud('gauge', s.shared.boss ? 100 : Math.min(100, s.shared.gauge / C.boss.gauge.full * 100), (el, v) => { el.style.width = `${v}%`; });
     }
 
     // ===== 描く =====
