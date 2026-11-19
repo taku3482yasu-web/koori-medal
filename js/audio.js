@@ -83,8 +83,9 @@ const Sound = (() => {
     let lastClink = 0;
     const SE = {
         // メダルが 落ちる たび「シャリン」(氷の 音)
-        clink: () => { const t = ctx.currentTime; if (t - lastClink < 0.05) return; lastClink = t; const f = 2400 + Math.random() * 900; tone(f, t, 0.12, 'sine', 0.18); tone(f * 1.5, t + 0.02, 0.1, 'sine', 0.1); },
-        insert: () => { const t = ctx.currentTime; tone(1500, t, 0.05, 'square', 0.08); },
+        // 2026-11-19 重厚感: 低めの 音に ずしっと した 音を 足す
+        clink: () => { const t = ctx.currentTime; if (t - lastClink < 0.05) return; lastClink = t; const f = 1500 + Math.random() * 600; tone(f, t, 0.14, 'sine', 0.16); tone(f * 1.42, t + 0.02, 0.1, 'sine', 0.08); tone(150, t, 0.09, 'triangle', 0.14); },
+        insert: () => { const t = ctx.currentTime; tone(900, t, 0.05, 'square', 0.06); tone(180, t, 0.07, 'triangle', 0.1); },
         chakker: () => { const t = ctx.currentTime; ['E6', 'G6', 'B6'].forEach((n, i) => tone(n, t + i * 0.05, 0.12, 'square', 0.15)); },
         stop: () => { tone(330, ctx.currentTime, 0.08, 'square', 0.2); },
         reach: () => { const t = ctx.currentTime; for (let i = 0; i < 6; i++) tone(i % 2 ? 'A5' : 'E5', t + i * 0.09, 0.08, 'square', 0.18); },

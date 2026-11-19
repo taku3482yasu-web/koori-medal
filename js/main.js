@@ -26,7 +26,7 @@
 
     // ----- セーブ -----
     function save() {
-        try { localStorage.setItem(SAVE, JSON.stringify({ s, field: P.snapshot() })); } catch (e) { /* なし */ }
+        try { localStorage.setItem(SAVE, JSON.stringify({ s, field: P.snapshot(), R: F.medalR })); } catch (e) { /* なし */ }
     }
     function load() {
         try { const v = JSON.parse(localStorage.getItem(SAVE)); return v && v.s && v.s.version === 1 ? v : null; } catch (e) { return null; }
@@ -34,9 +34,12 @@
     function start() {
         const v = !params.get('fresh') && load();
         P = Coin25D.create({ side: F.side, seed: (Math.random() * 2 ** 31) | 0, R: F.medalR, T: F.medalT, RB: F.ballR });
-        if (v) { s = v.s; s.shared.boss = null; P.restore(v.field); for (let i = 0; i < 40; i++) P.step(); P.take(); }
+        // メダルの 大きさが かわった セーブは 台の 山だけ 作りなおす (手持ち・JP は のこす) (2026-11-19 半径 15 → 18)
+        const sameField = v && v.R === F.medalR;
+        if (sameField) { s = v.s; s.shared.boss = null; P.restore(v.field); for (let i = 0; i < 40; i++) P.step(); P.take(); }
         else {
-            s = Game.newState(params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 2 ** 31));
+            s = v ? v.s : Game.newState(params.get('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 2 ** 31));
+            if (v) s.shared.boss = null;
             // はじめの 山は 先に 作った もの (js/start-field.js)。スマホで fill を その場で 計算すると 10 秒 ちかく 画面が 出なかった (2026-11-19)
             if (typeof START_FIELD !== 'undefined') P.restore(START_FIELD); else P.fill(F.startUpper, F.startLower);
             for (let i = 0; i < C.fieldBall.start; i++) P.addBall(i < C.fieldBall.startSpecial ? 'sball' : 'cball', 60 + i * 100);
@@ -709,19 +712,21 @@
         const w = Math.ceil(rq * 2 + pad * 2), h = Math.ceil(ry * 2 + th + pad * 2 + 3);
         const cv2 = document.createElement('canvas'); cv2.width = w * S; cv2.height = h * S;
         const q = cv2.getContext('2d'); q.scale(S, S); q.translate(w / 2, pad + ry + th);
-        const C0 = gold ? ['#fff3b0', '#e8b020', '#8a5a08', '#5a3a04'] : ['#ffffff', '#c4ccd8', '#6a7484', '#3a4250'], r_ = rq;
-        q.fillStyle = 'rgba(0,0,0,0.30)'; q.beginPath(); q.ellipse(1.5, 2.6, r_ * 1.02, ry * 1.08 + 0.5, 0, 0, 7); q.fill();   // かげ
+        // 2026-11-19 ユーザー: 重厚感 → 側面を 暗く 太く・かげを 濃く・ふちを 広く
+        const C0 = gold ? ['#fff3b0', '#e8b020', '#7a4a04', '#3e2602'] : ['#ffffff', '#c4ccd8', '#5a6474', '#262c38'], r_ = rq;
+        q.fillStyle = 'rgba(0,0,0,0.48)'; q.beginPath(); q.ellipse(2.2, 3.6, r_ * 1.05, ry * 1.12 + 0.8, 0, 0, 7); q.fill();   // かげ
         const sg = q.createLinearGradient(-r_, 0, r_, 0); sg.addColorStop(0, C0[3]); sg.addColorStop(0.35, C0[1]); sg.addColorStop(0.6, C0[2]); sg.addColorStop(1, C0[3]);
         q.fillStyle = sg; q.beginPath(); q.ellipse(0, 0, r_, ry, 0, 0, Math.PI); q.lineTo(-r_, -th); q.ellipse(0, -th, r_, ry, 0, Math.PI, 0, true); q.closePath(); q.fill();
-        if (r_ > 6) { q.strokeStyle = 'rgba(0,0,0,0.28)'; q.lineWidth = 0.8; q.beginPath(); for (let i = -6; i <= 6; i++) { const xx = r_ * Math.sin(i * 0.24), yy = ry * Math.sqrt(Math.max(0, 1 - (xx / r_) ** 2)); q.moveTo(xx, yy - th); q.lineTo(xx, yy); } q.stroke(); }
+        if (r_ > 6) { q.strokeStyle = 'rgba(0,0,0,0.38)'; q.lineWidth = 0.8; q.beginPath(); for (let i = -9; i <= 9; i++) { const xx = r_ * Math.sin(i * 0.165), yy = ry * Math.sqrt(Math.max(0, 1 - (xx / r_) ** 2)); q.moveTo(xx, yy - th); q.lineTo(xx, yy); } q.stroke(); }
         const fg = q.createLinearGradient(-r_ * 0.7, -th - ry, r_ * 0.7, -th + ry); fg.addColorStop(0, C0[0]); fg.addColorStop(0.5, C0[1]); fg.addColorStop(1, C0[2]);
         q.fillStyle = fg; q.beginPath(); q.ellipse(0, -th, r_, ry, 0, 0, 7); q.fill();
         // ふちの 段 (内がわが 一段 低い: 上が かげ・下が ひかり)
-        q.lineWidth = Math.max(0.9, r_ * 0.07);
+        q.lineWidth = Math.max(1.1, r_ * 0.10);
         q.strokeStyle = gold ? 'rgba(100,55,0,0.6)' : 'rgba(40,48,62,0.55)'; q.beginPath(); q.ellipse(0, -th, r_ * 0.8, ry * 0.8, 0, Math.PI, Math.PI * 2); q.stroke();
         q.strokeStyle = 'rgba(255,255,255,0.75)'; q.beginPath(); q.ellipse(0, -th, r_ * 0.8, ry * 0.8, 0, 0, Math.PI); q.stroke();
         const inner = q.createLinearGradient(0, -th - ry * 0.8, 0, -th + ry * 0.8); inner.addColorStop(0, gold ? '#d8a020' : '#a8b2c0'); inner.addColorStop(1, gold ? '#f8d870' : '#dde3ec');
-        q.fillStyle = inner; q.beginPath(); q.ellipse(0, -th, r_ * 0.76, ry * 0.76, 0, 0, 7); q.fill();
+        q.fillStyle = inner; q.beginPath(); q.ellipse(0, -th, r_ * 0.72, ry * 0.72, 0, 0, 7); q.fill();
+        q.strokeStyle = gold ? 'rgba(70,38,0,0.55)' : 'rgba(20,26,36,0.5)'; q.lineWidth = Math.max(0.8, r_ * 0.05); q.beginPath(); q.ellipse(0, -th, r_, ry, 0, 0, Math.PI); q.stroke();   // 表の ふちの 下がわ (厚みの 境目)
         // 刻印 (雪の 結晶・うき彫り: かげ + ひかり)
         if (r_ > 7) {
             const flake = (dx, dy, col) => { q.strokeStyle = col; q.lineWidth = Math.max(0.8, r_ * 0.08); q.lineCap = 'round'; q.beginPath(); for (let i = 0; i < 3; i++) { const a = i * Math.PI / 3, cx = Math.cos(a), sy = Math.sin(a); q.moveTo(dx - cx * r_ * 0.5, -th + dy - sy * ry * 0.5); q.lineTo(dx + cx * r_ * 0.5, -th + dy + sy * ry * 0.5); for (const sgn of [-1, 1]) { const bx = dx + sgn * cx * r_ * 0.3, by = -th + dy + sgn * sy * ry * 0.3; q.moveTo(bx, by); q.lineTo(bx + Math.cos(a + 0.7) * r_ * 0.12 * sgn, by + Math.sin(a + 0.7) * ry * 0.12 * sgn); } } q.stroke(); };
